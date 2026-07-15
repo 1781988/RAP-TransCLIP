@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rap-transclip"
+version = "0.1.0"
+description = "Reliability-aware prompt and active-prior transduction for remote-sensing VLMs"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "RAP-TransCLIP Contributors"}]
+dependencies = [
+  "numpy>=1.26,<3",
+  "pandas>=2.1",
+  "PyYAML>=6.0",
+  "Pillow>=10.0",
+  "tqdm>=4.66",
+  "scipy>=1.11",
+  "scikit-learn>=1.3",
+  "open-clip-torch>=2.26",
+  "huggingface-hub>=0.23",
+  "requests>=2.31",
+]
+
+[project.scripts]
+rap-transclip = "rap_transclip.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rap_transclip*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

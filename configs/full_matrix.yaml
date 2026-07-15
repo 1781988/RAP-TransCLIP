@@ -1,0 +1,114 @@
+project:
+  name: RAP-TransCLIP
+  seed: 1
+  device: cuda
+
+paths:
+  datasets: datasets
+  indexes: outputs/indexes
+  features: outputs/features
+  results: outputs/results
+  checkpoints: checkpoints
+
+datasets:
+  - AID
+  - EuroSAT
+  - MLRSNet
+  - OPTIMAL31
+  - PatternNet
+  - RESISC45
+  - RSC11
+  - RSICB128
+  - RSICB256
+  - WHURS19
+
+models:
+  CLIP:
+    enabled: true
+    backend: open_clip
+    architectures:
+      RN50: {pretrained: openai, checkpoint: null}
+      ViT-B-32: {pretrained: openai, checkpoint: null}
+      ViT-L-14: {pretrained: openai, checkpoint: null}
+
+  RemoteCLIP:
+    enabled: true
+    backend: open_clip_checkpoint
+    architectures:
+      RN50: {pretrained: null, checkpoint: checkpoints/RemoteCLIP/RemoteCLIP-RN50.pt}
+      ViT-B-32: {pretrained: null, checkpoint: checkpoints/RemoteCLIP/RemoteCLIP-ViT-B-32.pt}
+      ViT-L-14: {pretrained: null, checkpoint: checkpoints/RemoteCLIP/RemoteCLIP-ViT-L-14.pt}
+
+  GeoRSCLIP:
+    enabled: true
+    backend: open_clip_checkpoint
+    architectures:
+      ViT-B-32: {pretrained: null, checkpoint: checkpoints/GeoRSCLIP/RS5M_ViT-B-32.pt}
+      ViT-L-14: {pretrained: null, checkpoint: checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt}
+      ViT-H-14: {pretrained: null, checkpoint: checkpoints/GeoRSCLIP/RS5M_ViT-H-14.pt}
+
+  SkyCLIP50:
+    enabled: true
+    backend: open_clip_checkpoint
+    architectures:
+      ViT-B-32: {pretrained: null, checkpoint: checkpoints/SkyCLIP50/SkyCLIP_ViT_B32_top50pct_epoch_20.pt}
+      ViT-L-14: {pretrained: null, checkpoint: checkpoints/SkyCLIP50/SkyCLIP_ViT_L14_top50pct_epoch_20.pt}
+
+feature_extraction:
+  batch_size: 64
+  num_workers: 8
+  amp: true
+  prompt_file: configs/prompts/rs106.txt
+  image_extensions: [.jpg, .jpeg, .png, .tif, .tiff, .bmp, .webp]
+
+zero_shot: {logit_scale: 100.0}
+
+prompt_reliability:
+  top_fraction: 0.02
+  min_top_samples: 8
+  confidence_weight: 1.0
+  entropy_weight: 0.6
+  margin_weight: 0.7
+  agreement_weight: 0.8
+  temperature: 0.15
+  weight_ema: 0.5
+
+sample_reliability:
+  entropy_weight: 0.6
+  disagreement_weight: 0.4
+  minimum: 0.05
+
+active_prior:
+  enabled: true
+  ema: 0.5
+  dirichlet_alpha: 0.5
+  anchor_weight: 0.20
+  minimum_probability: 1.0e-4
+  gate_temperature: 0.05
+  peak_threshold: 0.30
+  mass_ratio_threshold: 0.20
+
+graph:
+  backend: auto
+  k: 5
+  mutual: true
+  kernel: rbf
+  local_scale_rank: 5
+  reliability_weighting: true
+  chunk_size: 2048
+  minimum_similarity: 0.0
+
+solver:
+  outer_iterations: 10
+  assignment_iterations: 5
+  graph_strength: 1.0
+  text_anchor_strength: 1.0
+  likelihood_temperature: 50.0
+  covariance_floor: 1.0e-4
+  prototype_topk: 8
+  use_active_prior: true
+  update_prompt_weights: true
+  convergence_tolerance: 1.0e-5
+
+protocol: {name: full, seed: 1}
+runtime: {deterministic: true, save_assignments: false, overwrite: false, experiment_tag: main}

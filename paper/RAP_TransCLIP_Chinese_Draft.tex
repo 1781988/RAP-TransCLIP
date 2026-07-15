@@ -1,0 +1,70 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[UTF8,heading=true]{ctex}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setmainfont{Liberation Serif}
+\setsansfont{Liberation Sans}
+\usepackage[letterpaper,top=0.60in,bottom=0.65in,left=0.63in,right=0.63in,columnsep=0.23in]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,graphicx,array,microtype,enumitem,caption,xcolor,float,dblfloatfix,placeins}
+\usepackage[hidelinks]{hyperref}
+\captionsetup{font=small,skip=2pt}
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0pt}
+\setlength{\textfloatsep}{6pt plus 1pt minus 1pt}
+\setlength{\floatsep}{5pt plus 1pt minus 1pt}
+\setlength{\intextsep}{5pt plus 1pt minus 1pt}
+\setlist[itemize]{leftmargin=1.4em,itemsep=0pt,topsep=2pt}
+\newcommand{\method}{RAP-TransCLIP}
+\newcommand{\TBD}{\textit{待补充}}
+\begin{document}
+\pagestyle{empty}
+\twocolumn[
+\begin{center}
+{\LARGE\bfseries RAP-TransCLIP：面向遥感零样本场景分类的\\可靠性提示与活跃先验传导方法\par}
+\vspace{0.35em}
+{\normalsize 作者1，作者2，作者3\par}
+{\small 单位，城市，国家\quad email1@example.com，email2@example.com\par}
+\vspace{0.45em}
+\begin{minipage}{0.96\textwidth}
+\small
+\textbf{摘要—}遥感视觉语言模型通过匹配图像嵌入与文本类别原型实现零样本场景识别。RS-TransCLIP利用无标签传导推理显著改进了该范式，但其将大规模提示词集合进行等权平均，并对全部候选类别采用均衡混合假设。本文提出\textbf{RAP-TransCLIP}，一种无需训练的遥感视觉语言模型传导框架。在冻结视觉语言骨干的条件下，该方法联合优化类别级提示可靠性、图像软分配、视觉类别原型和活跃类别先验。类别级可靠性估计器依据预测置信度、预测熵、类别分离度及与当前传导分配的一致性对提示词评分；锚定式活跃先验更新从无标签目标集合估计类别分布；可靠性加权互近邻图抑制不确定样本引起的错误传播。本文计划在十个遥感场景分类基准上使用CLIP、RemoteCLIP、GeoRSCLIP和SkyCLIP开展系统实验。\textbf{当前主要实验结果：待完成。}
+
+\textbf{关键词—}遥感，视觉语言模型，零样本分类，传导推理，提示可靠性，类别先验估计。
+\end{minipage}
+\end{center}
+]
+\section{引言}
+遥感场景分类是土地利用分析、环境监测、城市规划和灾害评估的重要基础。以CLIP为代表的视觉语言模型通过自然语言类别描述，将图文预训练知识迁移到下游识别任务。RemoteCLIP、GeoRSCLIP和SkyCLIP进一步提升了俯视遥感影像与文本之间的语义对齐能力。然而，零样本预测仍对提示词措辞与目标分布敏感。
+
+RS-TransCLIP对整个目标集合进行联合传导预测，结合文本伪标签、高斯混合似然和图正则项，在无需更新VLM参数的条件下取得明显提升。但其将106个遥感提示模板等权平均为每类唯一文本原型，并采用均匀类别先验。本文提出\method，为每个类别估计独立提示分布，从无标签目标集合推断带文本锚定的活跃类别先验，并构建由样本可靠性调节边权的互近邻图。
+
+\section{所提方法}
+设无标签目标集合图像嵌入为$F\in\mathbb{R}^{N\times d}$，提示与类别文本嵌入为$T=\{t_{m,k}\}$。需要估计软分配$Z\in\Delta^{N\times K}$、类别原型$\mu_k$、共享对角协方差$\Sigma$、提示权重$A=[\alpha_{m,k}]$和类别先验$\pi$。
+
+对第$m$个提示，定义类别级可靠性
+\[
+r_{m,k}=\beta_c C_{m,k}-\beta_hH_{m,k}+\beta_dD_{m,k}+\beta_aA_{m,k},
+\]
+并通过softmax得到$\alpha_{m,k}$，形成加权文本原型$\bar t_k=\operatorname{norm}(\sum_m\alpha_{m,k}t_{m,k})$。依据预测熵和提示间分歧估计样本可靠性$q_i$，构建互$k$近邻RBF图。类别似然显式包含先验$p_{i,k}\propto\pi_k\mathcal N(f_i;\mu_k,\Sigma)$，并以Dirichlet平滑与初始文本先验锚定更新$\pi$。软分配采用图信息、文本锚和高斯似然的加权softmax交替更新。
+
+\section{实验}
+实验首先使用原论文十个数据集：AID、EuroSAT、MLRSNet、OPTIMAL31、PatternNet、RESISC45、RSC11、RSICB128、RSICB256和WHURS19。第一阶段以GeoRSCLIP ViT-L/14运行零样本VLM、RS-TransCLIP兼容基线和完整RAP-TransCLIP，随后开展组件消融、提示评分消融、图结构消融以及类别缺失和Dirichlet长尾协议。真实标签只用于最终指标计算。
+
+\begin{table}[H]
+\centering
+\caption{十个数据集平均的组件消融。}
+\begin{tabular}{lccc}
+\toprule
+配置 & Top-1 & F1 & ECE\\
+\midrule
+RS-TransCLIP & \TBD & \TBD & \TBD\\
++ 类别级提示 & \TBD & \TBD & \TBD\\
++ 活跃先验 & \TBD & \TBD & \TBD\\
+完整方法 & \textbf{\TBD} & \textbf{\TBD} & \textbf{\TBD}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{结论}
+本文提出\method，一种无需训练的遥感VLM传导推理扩展。该方法以类别级可靠性后验替代提示词等权平均，通过锚定式活跃类别先验放宽均衡混合假设，并抑制不确定节点引起的图传播误差。完整实验结果将在十数据集评测完成后填入。
+\end{document}
