@@ -61,7 +61,8 @@ feature_extraction:
   prompt_file: configs/prompts/rs106.txt
   image_extensions: [.jpg, .jpeg, .png, .tif, .tiff, .bmp, .webp]
 
-zero_shot: {logit_scale: 100.0}
+zero_shot:
+  logit_scale: 100.0
 
 prompt_reliability:
   top_fraction: 0.02
@@ -72,6 +73,8 @@ prompt_reliability:
   agreement_weight: 0.8
   temperature: 0.15
   weight_ema: 0.5
+  prompt_chunk_size: 4
+  top_prompts_per_class: 0
 
 sample_reliability:
   entropy_weight: 0.6
@@ -106,9 +109,34 @@ solver:
   likelihood_temperature: 50.0
   covariance_floor: 1.0e-4
   prototype_topk: 8
+  use_prompt_reliability: true
   use_active_prior: true
   update_prompt_weights: true
   convergence_tolerance: 1.0e-5
 
-protocol: {name: full, seed: 1}
-runtime: {deterministic: true, save_assignments: false, overwrite: false, experiment_tag: main}
+shift_gate:
+  enabled: true
+  weights:
+    effective_classes: 0.25
+    prior_divergence: 0.25
+    inactive_support: 0.50
+  threshold: 0.20
+  temperature: 0.04
+  confidence_reference: 0.25
+  confidence_temperature: 0.05
+  peak_threshold: 0.30
+  mass_ratio_threshold: 0.20
+  evidence_temperature: 0.05
+  skip_rap_below: 0.05
+  skip_rs_above: 0.95
+
+protocol:
+  name: full
+  seed: 1
+
+runtime:
+  deterministic: true
+  save_assignments: false
+  save_diagnostics: false
+  overwrite: false
+  experiment_tag: full_matrix
