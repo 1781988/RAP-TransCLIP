@@ -1,8 +1,8 @@
-RAP-TransCLIP is inspired by:
+TextGraph-TransCLIP is an independent research extension inspired by:
 
 1. K. El Khoury et al., "Enhancing Remote Sensing Vision-Language Models for Zero-Shot Scene Classification," ICASSP 2025.
    Official code: https://github.com/elkhouryk/RS-TransCLIP
 
 2. M. Zanella, B. Gérin, and I. Ben Ayed, "Boosting Vision-Language Models with Transduction," NeurIPS 2024.
 
-The prompt inventory follows the public RS-TransCLIP repository. Verify and retain the original attribution when redistributing derived prompt files or code.
+The prompt inventory follows the public RS-TransCLIP repository. The TextGraph implementation rewrites the graph construction and solver integration for this repository. Retain the original attributions and comply with checkpoint and dataset licenses when redistributing derived resources.
