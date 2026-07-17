@@ -29,8 +29,7 @@ def main():
         default=[
             "zero_shot",
             "rs_transclip",
-            "rap_transclip",
-            "sa_rap_transclip",
+            "textgraph_transclip",
         ],
     )
     parser.add_argument("--override", action="append", default=[])
