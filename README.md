@@ -1,20 +1,29 @@
-# RAP-TransCLIP
+# SA-RAP-TransCLIP
 
-**Reliability-Aware Prompt and Active-Prior Transduction for Zero-Shot Remote Sensing Scene Classification**
+**Shift-Aware Reliability-Aware Prompt and Active-Prior Transduction for Zero-Shot Remote-Sensing Scene Classification**
 
-RAP-TransCLIP is a training-free extension of RS-TransCLIP for remote-sensing vision-language models. It keeps the image and text encoders frozen and adds three test-time components:
+This repository studies when transductive remote-sensing VLM adaptation should be enabled. The code contains four inference modes:
 
-1. **Category-wise prompt reliability estimation** instead of uniformly averaging all prompt templates.
-2. **Active-class and non-uniform class-prior estimation** instead of assuming that every candidate class is present and balanced.
-3. **Reliability-aware mutual-kNN propagation** to reduce error amplification on the transductive graph.
+1. `zero_shot`: uniform-prompt zero-shot VLM;
+2. `rs_transclip`: reproduced RS-TransCLIP-compatible solver;
+3. `rap_transclip`: prompt-, prior-, and graph-adaptive solver;
+4. `sa_rap_transclip`: shift-aware gated selection/fusion of RS-TransCLIP and RAP-TransCLIP.
 
-This repository is an experiment-ready research scaffold for the ten datasets used by RS-TransCLIP:
+The shift-aware method is motivated by the current empirical boundary: RAP-TransCLIP improves severe partial-class and long-tail protocols, but underperforms RS-TransCLIP on favorable full-class batches. SA-RAP estimates batch-level class-prior mismatch from unlabeled zero-shot predictions and conservatively selects or fuses the two experts.
 
-`AID`, `EuroSAT`, `MLRSNet`, `OPTIMAL31`, `PatternNet`, `RESISC45`, `RSC11`, `RSICB128`, `RSICB256`, and `WHURS19`.
+No datasets or pretrained checkpoints are included.
 
-> Current status: method implementation and experiment pipeline are provided; paper tables contain `TBD` placeholders until the experiments are run. No dataset images or pretrained checkpoints are included.
+## 1. Main changes in the shift-aware version
 
-## 1. Repository layout
+- Unsupervised batch shift estimator using effective-class compression, prior divergence, missing class evidence, and a confidence guard.
+- `sa_rap_transclip` solver with RS-only, soft-fusion, and RAP-only execution branches.
+- Prompt-reliability computation in chunks rather than materializing all `[prompt, image, class]` probabilities.
+- Severe-shift component ablation script.
+- Gate threshold/temperature sensitivity script.
+- Diagnostic bundles containing gate statistics, priors, prompt weights, and assignments.
+- Three-seed protocol runner.
+
+## 2. Repository layout
 
 ```text
 RAP-TransCLIP/
@@ -22,240 +31,110 @@ RAP-TransCLIP/
 │   ├── standard.yaml
 │   ├── full_matrix.yaml
 │   └── prompts/rs106.txt
-├── datasets/                     # copy datasets here; ignored by Git
-│   └── <DATASET>/
-│       ├── images/
-│       ├── classes.txt
-│       └── class_changes.txt
-├── checkpoints/                  # copy/download VLM checkpoints here
-├── outputs/                      # generated features and result CSV files
+├── datasets/
+├── checkpoints/
+├── outputs/
 ├── paper/
-│   ├── ICASSP2027_RAP_TransCLIP_Draft.md
-│   ├── RAP_TransCLIP_Chinese_Draft.tex
-│   └── RAP_TransCLIP_Chinese_Draft.pdf
+│   └── SA_RAP_TransCLIP_Chinese_Draft.md
 ├── rap_transclip/
-│   ├── config.py
-│   ├── data.py
-│   ├── feature_extraction.py
-│   ├── graph.py
-│   ├── metrics.py
-│   ├── models.py
-│   ├── prompts.py
-│   ├── protocols.py
 │   ├── reliability.py
-│   ├── runner.py
-│   └── solver.py
+│   ├── shift.py
+│   ├── solver.py
+│   └── runner.py
 ├── scripts/
-│   ├── build_index.py
-│   ├── download_checkpoints.py
-│   ├── extract_features.py
-│   ├── run_all_experiments.sh
 │   ├── run_all_standard.py
-│   ├── run_ablation_suite.py
 │   ├── run_protocol_suite.py
-│   ├── run_experiment.py
-│   └── summarize_results.py
-├── tests/test_smoke.py
-├── requirements.txt
-└── pyproject.toml
+│   ├── run_shift_component_ablation.py
+│   ├── run_gate_sensitivity.py
+│   └── run_paper_experiments.sh
+└── tests/test_smoke.py
 ```
 
-## 2. Environment setup
-
-The recommended environment is Linux, Python 3.10 or 3.11, PyTorch 2.2 or newer, and a CUDA GPU.
+## 3. Environment
 
 ```bash
-git clone https://github.com/1781988/RAP-TransCLIP.git
-cd RAP-TransCLIP
+cd /home/user/GMY/RAP-TransCLIP
 
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+conda create -n rap-transclip python=3.10 -y
+conda activate rap-transclip
 
-# Install a PyTorch build matching your CUDA version first.
-# Example only; use the command from pytorch.org for your machine.
+python -m pip install --upgrade pip setuptools wheel
+
+# Install the PyTorch build matching the server CUDA version first.
 pip install torch torchvision
 
 pip install -e .
-```
-
-Optional but strongly recommended for large datasets:
-
-```bash
 pip install faiss-cpu
-# For a compatible CUDA installation, faiss-gpu may be used instead.
-```
 
-Check the installation:
-
-```bash
 pytest -q
-python -m rap_transclip.cli --help
 ```
 
-## 2.1 Fast path: reproduce the complete ten-dataset screening
+The current tests cover RS-TransCLIP, RAP-TransCLIP, SA-RAP-TransCLIP, probability normalization, prompt weights, and the expected increase of the shift score when classes are removed.
 
-After the environment is installed, copy all ten datasets into `datasets/`, then run:
-
-```bash
-python scripts/download_checkpoints.py --models GeoRSCLIP --architectures ViT-L-14
-bash scripts/run_all_experiments.sh standard
-```
-
-This executes the following fixed comparison on every dataset:
-
-- inductive zero-shot VLM;
-- the in-repository RS-TransCLIP-compatible baseline;
-- the complete RAP-TransCLIP method.
-
-The primary result files are `outputs/results/raw_results.csv` and `outputs/results/summary.csv`. Feature tensors are cached, so subsequent ablation runs do not re-encode images.
-
-For the complete backbone/architecture matrix:
-
-```bash
-python scripts/download_checkpoints.py --models RemoteCLIP GeoRSCLIP SkyCLIP50
-bash scripts/run_all_experiments.sh full
-```
-
-The full matrix is substantially more expensive. Complete the standard GeoRSCLIP ViT-L/14 screening first.
-
-## 3. Dataset preparation
-
-Do not commit datasets to Git. Copy each dataset into `datasets/<DATASET>/` using the same flat structure as RS-TransCLIP:
+## 4. Dataset structure
 
 ```text
-datasets/EuroSAT/
-├── classes.txt
-├── class_changes.txt
-└── images/
-    ├── annualcropland_1.jpg
-    ├── forest_1.jpg
-    └── ...
+datasets/
+├── AID/
+│   ├── classes.txt
+│   ├── class_changes.txt
+│   └── images/
+├── EuroSAT/
+├── MLRSNet/
+├── OPTIMAL31/
+├── PatternNet/
+├── RESISC45/
+├── RSC11/
+├── RSICB128/
+├── RSICB256/
+└── WHURS19/
 ```
 
-`classes.txt` contains one machine-readable class token per line. `class_changes.txt` contains the corresponding display name used in text prompts. The two files must contain the same number of lines and preserve the same class order.
-
-Example:
-
-```text
-# classes.txt
-annualcropland
-forest
-highwayorroad
-
-# class_changes.txt
-annual crop land
-forest
-highway or road
-```
-
-The loader also accepts class-subdirectory layouts such as `images/forest/xxx.jpg`. For reproducibility, the flat RS-TransCLIP layout is preferred.
-
-Build and validate an index for one dataset:
-
-```bash
-python scripts/build_index.py --dataset EuroSAT --config configs/standard.yaml
-```
-
-Build indexes for all ten datasets:
+Build indexes:
 
 ```bash
 for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB256 WHURS19; do
-  python scripts/build_index.py --dataset "$d" --config configs/standard.yaml
+  python scripts/build_index.py \
+    --dataset "$d" \
+    --config configs/standard.yaml
 done
 ```
 
-The command writes `outputs/indexes/<DATASET>.jsonl` and reports unmapped or unreadable files. Fix all mapping errors before feature extraction.
+## 5. Checkpoints
 
-## 4. Pretrained model preparation
-
-The default configuration contains four VLM families used by the original paper: CLIP, RemoteCLIP, GeoRSCLIP, and SkyCLIP50.
-
-CLIP can be loaded directly through OpenCLIP. The remote-sensing checkpoints should be copied to the locations below or changed in `configs/standard.yaml`:
-
-```text
-checkpoints/
-├── RemoteCLIP/
-│   ├── RemoteCLIP-RN50.pt
-│   ├── RemoteCLIP-ViT-B-32.pt
-│   └── RemoteCLIP-ViT-L-14.pt
-├── GeoRSCLIP/
-│   ├── RS5M_ViT-B-32.pt
-│   ├── RS5M_ViT-L-14.pt
-│   └── RS5M_ViT-H-14.pt
-└── SkyCLIP50/
-    ├── SkyCLIP_ViT_B32_top50pct_epoch_20.pt
-    └── SkyCLIP_ViT_L14_top50pct_epoch_20.pt
-```
-
-Checkpoint key prefixes are normalized automatically for common `module.` and `model.` wrappers.
-
-### Recommended staged model plan
-
-1. `GeoRSCLIP / ViT-L-14` on `EuroSAT`, `AID`, and `RESISC45`.
-2. Add the other seven datasets after the first three reproduce sensible zero-shot accuracy.
-3. Add `RemoteCLIP / ViT-L-14` and `SkyCLIP50 / ViT-L-14`.
-4. Run the complete architecture matrix only after the method is stable.
-
-## 5. Prompt bank
-
-`configs/prompts/rs106.txt` contains the 106 remote-sensing templates used in the source framework. Each line is a template prefix; the class name is appended automatically.
-
-Uniform RS-TransCLIP uses the normalized mean of all prompt embeddings. RAP-TransCLIP preserves the full tensor:
-
-```text
-texts_all.pt: [num_prompts, num_classes, embedding_dim]
-```
-
-and estimates a separate prompt distribution for every class.
-
-## 6. Feature extraction
-
-Extract one dataset/model combination:
+Initial experiments use GeoRSCLIP ViT-L/14:
 
 ```bash
-python scripts/extract_features.py \
-  --config configs/standard.yaml \
-  --dataset EuroSAT \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14
+python scripts/download_checkpoints.py \
+  --models GeoRSCLIP \
+  --architectures ViT-L-14
 ```
 
-Expected outputs:
+The expected file is:
 
 ```text
-outputs/features/EuroSAT/GeoRSCLIP/ViT-L-14/
-├── images.pt
-├── labels.pt
-├── texts_all.pt
-├── texts_uniform.pt
-├── classes.json
-├── image_paths.json
-└── metadata.json
+checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
 ```
 
-The labels are stored only for evaluation. Neither RS-TransCLIP nor RAP-TransCLIP uses ground-truth labels during inference. The number of candidate classes is obtained from the text prototypes, not from test labels.
-
-Extract all enabled combinations:
-
-```bash
-python scripts/run_all_standard.py --config configs/standard.yaml --stage features
-```
-
-To limit a run:
+## 6. Extract features
 
 ```bash
 python scripts/run_all_standard.py \
   --config configs/standard.yaml \
   --stage features \
-  --datasets EuroSAT AID RESISC45 \
   --models GeoRSCLIP \
   --architectures ViT-L-14
 ```
 
-## 7. Run the three primary methods
+Features are cached under:
 
-### 7.1 Zero-shot VLM
+```text
+outputs/features/<dataset>/<model>/<architecture>/
+```
+
+All methods use identical cached image and text embeddings.
+
+## 7. Run one method
 
 ```bash
 python scripts/run_experiment.py \
@@ -263,101 +142,192 @@ python scripts/run_experiment.py \
   --dataset EuroSAT \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --method zero_shot
+  --method sa_rap_transclip
 ```
 
-### 7.2 RS-TransCLIP-compatible baseline
+The result CSV contains shift diagnostics in the `diagnostics` field, including:
 
-```bash
-python scripts/run_experiment.py \
-  --config configs/standard.yaml \
-  --dataset EuroSAT \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --method rs_transclip
-```
+- `score`;
+- `gate`;
+- `effective_class_ratio`;
+- `prior_divergence`;
+- `active_class_ratio`;
+- `mean_confidence`;
+- `solver_branch`.
 
-### 7.3 RAP-TransCLIP
-
-```bash
-python scripts/run_experiment.py \
-  --config configs/standard.yaml \
-  --dataset EuroSAT \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --method rap_transclip
-```
-
-RAP-TransCLIP performs category-wise prompt reliability scoring, weighted text-prototype construction, sample reliability estimation, mutual-kNN graph construction, and alternating updates of assignments, Gaussian prototypes, covariance, prompt weights, and class priors.
-
-## 8. Run all ten standard-dataset experiments
-
-```bash
-python scripts/run_all_standard.py --config configs/standard.yaml --stage evaluate
-```
-
-Run only the initial ten-dataset screening with GeoRSCLIP ViT-L/14:
+## 8. Full-class comparison
 
 ```bash
 python scripts/run_all_standard.py \
   --config configs/standard.yaml \
   --stage evaluate \
   --models GeoRSCLIP \
-  --architectures ViT-L-14
+  --architectures ViT-L-14 \
+  --methods zero_shot rs_transclip rap_transclip sa_rap_transclip
 ```
 
-Results are appended to `outputs/results/raw_results.csv` and summarized with:
+This experiment tests whether SA-RAP restores the full-class performance lost by unconditional RAP adaptation.
 
-```bash
-python scripts/summarize_results.py \
-  --input outputs/results/raw_results.csv \
-  --output outputs/results/summary.csv
-```
-
-## 9. Ablation experiments
-
-```bash
-python scripts/run_ablation_suite.py \
-  --config configs/standard.yaml \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --extended
-```
-
-The suite covers uniform prompts, category-wise prompt reliability, active priors, complete RAP-TransCLIP, prompt-score terms, and graph variants.
-
-## 10. Realistic protocols
+## 9. Six shift protocols, three seeds
 
 ```bash
 python scripts/run_protocol_suite.py \
   --config configs/standard.yaml \
   --model GeoRSCLIP \
-  --architecture ViT-L-14
+  --architecture ViT-L-14 \
+  --methods rs_transclip rap_transclip sa_rap_transclip \
+  --seeds 1 2 3
 ```
 
-The protocol suite contains partial-class and Dirichlet long-tail evaluation.
+Protocols:
 
-## 11. Reproducibility checklist
+- partial classes: 25%, 50%, 75%;
+- Dirichlet long tail: alpha 0.1, 0.5, 1.0.
 
-1. Record the exact dataset source and version.
-2. Record the class ordering and save `classes.json`.
-3. Keep feature tensors fixed while comparing methods.
-4. Run at least three seeds for graph/protocol randomness.
-5. Confirm that labels are not passed to the solver.
-6. Report both accuracy and macro-F1.
-7. Report runtime and peak memory.
-8. Save the full YAML and Git commit hash with every run.
-9. Verify AID versus Million-AID naming.
-10. Preserve raw per-run CSV files.
+Run only the two severe protocols:
 
-## 12. Paper workflow
+```bash
+python scripts/run_protocol_suite.py \
+  --config configs/standard.yaml \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14 \
+  --methods rs_transclip rap_transclip sa_rap_transclip \
+  --seeds 1 2 3 \
+  --severe-only
+```
 
-The working paper is located at `paper/ICASSP2027_RAP_TransCLIP_Draft.md`. After experiments, replace every `TBD`, generate figures, select compact main results, and transfer the final text into the official ICASSP 2027 LaTeX template when released.
+## 10. Severe-shift component ablation
 
-## 13. Attribution
+```bash
+python scripts/run_shift_component_ablation.py \
+  --config configs/standard.yaml \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14 \
+  --seeds 1 2 3
+```
 
-This project is an independent research extension inspired by RS-TransCLIP and TransCLIP. The baseline implementation is rewritten for this repository. Cite the original papers and comply with their licenses when reusing checkpoints, prompt lists, or code.
+The script compares:
 
-## 14. License
+- RS-TransCLIP;
+- active prior only;
+- class-wise prompts only;
+- reliable graph only;
+- prompt + prior;
+- prior + graph;
+- full RAP;
+- shift-aware RAP.
+
+It runs on partial-25 and long-tail alpha 0.1 because these are the regimes where the method is designed to help.
+
+## 11. Gate sensitivity
+
+Start with a reduced dataset subset:
+
+```bash
+python scripts/run_gate_sensitivity.py \
+  --config configs/standard.yaml \
+  --datasets EuroSAT AID RESISC45 \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14 \
+  --thresholds 0.10 0.15 0.20 0.25 0.30 \
+  --temperatures 0.02 0.04 0.08 \
+  --seeds 1 2 3
+```
+
+Do not tune the threshold separately for each dataset. Select one global setting and report the complete sensitivity surface.
+
+## 12. Paper experiment suite
+
+After features have been extracted:
+
+```bash
+bash scripts/run_paper_experiments.sh configs/standard.yaml
+```
+
+This runs:
+
+1. full-class four-method comparison;
+2. all six shift protocols with three seeds;
+3. severe-shift component ablation.
+
+Gate sensitivity is intentionally separate because it is substantially larger.
+
+## 13. Save diagnostic tensors
+
+Set in YAML:
+
+```yaml
+runtime:
+  save_diagnostics: true
+```
+
+or use:
+
+```bash
+--override runtime.save_diagnostics=true
+```
+
+Bundles are saved under:
+
+```text
+outputs/results/diagnostics/
+```
+
+They contain assignments, class priors, prompt weights, sample reliability, and gate statistics for later figures.
+
+## 14. Memory controls
+
+The main prompt-memory parameter is:
+
+```yaml
+prompt_reliability:
+  prompt_chunk_size: 4
+```
+
+Test `16`, `8`, and `4` and report both peak memory and prediction agreement with the unchunked implementation. Smaller chunks reduce peak memory but may increase runtime.
+
+Feature extraction memory is controlled separately:
+
+```yaml
+feature_extraction:
+  batch_size: 64
+```
+
+## 15. Recommended experiment order
+
+1. Run `pytest -q`.
+2. Run EuroSAT smoke tests for all four methods.
+3. Run full-class ten-dataset comparison.
+4. Run the two severe protocols with three seeds.
+5. Run all six protocols.
+6. Run severe-shift component ablation.
+7. Run gate sensitivity on three representative datasets.
+8. Freeze the gate configuration.
+9. Run four ViT-L/14 backbones.
+10. Run the complete 11-backbone matrix only if the method remains stable.
+
+## 16. Reproducibility constraints
+
+- Ground-truth labels may construct controlled protocol subsets but must never enter the solver.
+- Use the same cached features for every method.
+- Do not select gate thresholds per dataset.
+- Keep raw per-seed results.
+- Report paired confidence intervals and corrected significance tests.
+- Record the exact AID or Million-AID Level-2 version.
+- Record the Git commit and YAML configuration for every result table.
+
+## 17. Current scientific objective
+
+The paper should not claim that RAP-TransCLIP universally improves RS-TransCLIP. The target claim is narrower:
+
+> SA-RAP-TransCLIP detects severe class-prior mismatch from unlabeled target predictions, preserves RAP's gains when the shift is strong, and falls back to RS-TransCLIP when adaptation is unnecessary.
+
+The working Chinese manuscript is:
+
+```text
+paper/SA_RAP_TransCLIP_Chinese_Draft.md
+```
+
+## License
 
 Code in this repository is released under the MIT License. Dataset and pretrained-model licenses remain with their original providers.
