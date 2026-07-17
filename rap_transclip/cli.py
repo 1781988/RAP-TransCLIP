@@ -12,9 +12,8 @@ from .runner import run_experiment
 METHODS = [
     "zero_shot",
     "rs_transclip",
-    "rap_transclip",
-    "sa_rap_transclip",
-    "shift_aware_rap_transclip",
+    "textgraph_transclip",
+    "text_graph_transclip",
 ]
 
 
@@ -29,7 +28,7 @@ def _common_config(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="rap-transclip")
+    parser = argparse.ArgumentParser(prog="textgraph-transclip")
     sub = parser.add_subparsers(dest="command", required=True)
 
     index_parser = sub.add_parser("index", help="Build one dataset index")

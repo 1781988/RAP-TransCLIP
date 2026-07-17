@@ -6,47 +6,34 @@ from pathlib import Path
 import torch
 
 from rap_transclip.config import load_config
-from rap_transclip.shift import estimate_batch_shift
+from rap_transclip.graph import build_graph
 from rap_transclip.solver import (
-    solve_rap_transclip,
     solve_rs_transclip,
-    solve_shift_aware_rap_transclip,
+    solve_textgraph_transclip,
 )
 from rap_transclip.utils import l2_normalize
 
 
 def synthetic_problem(seed: int = 3):
     generator = torch.Generator().manual_seed(seed)
-    n_per_class, classes, prompts, dim = 12, 3, 7, 16
-    centers = l2_normalize(torch.randn(classes, dim, generator=generator))
+    class_count, feature_dim = 3, 16
+    centers = l2_normalize(
+        torch.randn(class_count, feature_dim, generator=generator)
+    )
     features = []
-    for class_id in range(classes):
+    for class_id in range(class_count):
         features.append(
             l2_normalize(
                 centers[class_id]
-                + 0.12 * torch.randn(
-                    n_per_class,
-                    dim,
-                    generator=generator,
-                )
-            )
-        )
-    images = torch.cat(features)
-    texts = []
-    for prompt_id in range(prompts):
-        texts.append(
-            l2_normalize(
-                centers
-                + (0.04 + prompt_id * 0.01)
+                + 0.12
                 * torch.randn(
-                    classes,
-                    dim,
+                    12,
+                    feature_dim,
                     generator=generator,
                 )
             )
         )
-    texts_all = torch.stack(texts)
-    return images, texts_all, l2_normalize(texts_all.mean(0))
+    return torch.cat(features), centers
 
 
 def cpu_config():
@@ -62,7 +49,7 @@ def cpu_config():
     return cfg
 
 
-def assert_probabilities(tensor):
+def assert_probabilities(tensor: torch.Tensor):
     assert torch.isfinite(tensor).all()
     assert torch.allclose(
         tensor.sum(dim=1),
@@ -71,43 +58,84 @@ def assert_probabilities(tensor):
     )
 
 
-def test_rs_transclip_smoke():
-    images, _, texts_uniform = synthetic_problem()
-    output = solve_rs_transclip(images, texts_uniform, cpu_config())
-    assert output.assignments.shape == (36, 3)
-    assert_probabilities(output.assignments)
-
-
-def test_rap_transclip_smoke():
-    images, texts_all, _ = synthetic_problem()
-    output = solve_rap_transclip(images, texts_all, cpu_config())
-    assert output.assignments.shape == (36, 3)
-    assert output.prompt_weights is not None
-    assert output.prompt_weights.shape == (7, 3)
-    assert_probabilities(output.assignments)
-    assert torch.allclose(
-        output.prompt_weights.sum(dim=0),
-        torch.ones(3),
-        atol=1e-5,
-    )
-
-
-def test_shift_aware_solver_smoke():
-    images, texts_all, texts_uniform = synthetic_problem()
-    output = solve_shift_aware_rap_transclip(
+def test_rs_and_textgraph_solvers_smoke():
+    images, texts = synthetic_problem()
+    rs_output = solve_rs_transclip(images, texts, cpu_config())
+    textgraph_output = solve_textgraph_transclip(
         images,
-        texts_all,
-        texts_uniform,
+        texts,
         cpu_config(),
     )
-    assert output.assignments.shape == (36, 3)
-    assert_probabilities(output.assignments)
-    assert 0.0 <= float(output.diagnostics["gate_weight"]) <= 1.0
+    assert rs_output.assignments.shape == (36, 3)
+    assert textgraph_output.assignments.shape == (36, 3)
+    assert_probabilities(rs_output.assignments)
+    assert_probabilities(textgraph_output.assignments)
+    assert textgraph_output.diagnostics["mean_gate_factor"] <= 1.0
 
 
-def test_shift_score_increases_when_classes_are_missing():
-    images, _, texts_uniform = synthetic_problem()
-    cfg = cpu_config()["shift_gate"]
-    full = estimate_batch_shift(images, texts_uniform, cfg)
-    partial = estimate_batch_shift(images[:12], texts_uniform, cfg)
-    assert partial.score > full.score
+def test_zero_semantic_strength_matches_rs_solver():
+    images, texts = synthetic_problem()
+    cfg = cpu_config()
+    rs_output = solve_rs_transclip(images, texts, cfg)
+    disabled = copy.deepcopy(cfg)
+    disabled["text_graph"]["semantic_strength"] = 0.0
+    textgraph_output = solve_textgraph_transclip(
+        images,
+        texts,
+        disabled,
+    )
+    assert torch.allclose(
+        rs_output.assignments,
+        textgraph_output.assignments,
+        atol=1e-6,
+    )
+
+
+def test_confident_semantic_disagreement_reduces_conductance():
+    features = l2_normalize(
+        torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.99, 0.05],
+                [0.98, 0.10],
+                [0.97, 0.15],
+            ]
+        )
+    )
+    probabilities = torch.tensor(
+        [
+            [0.99, 0.01],
+            [0.98, 0.02],
+            [0.02, 0.98],
+            [0.01, 0.99],
+        ]
+    )
+    visual_graph = build_graph(
+        features,
+        k=3,
+        backend="torch",
+    )
+    text_graph = build_graph(
+        features,
+        k=3,
+        backend="torch",
+        semantic_probabilities=probabilities,
+        semantic_strength=1.0,
+    )
+    assert visual_graph.diagnostics["mean_gate_factor"] == 1.0
+    assert text_graph.diagnostics["mean_gate_factor"] < 1.0
+    assert text_graph.diagnostics["min_gate_factor"] < 0.5
+
+
+def test_uncertain_text_predictions_fall_back_to_visual_graph():
+    generator = torch.Generator().manual_seed(4)
+    features = l2_normalize(torch.randn(8, 6, generator=generator))
+    probabilities = torch.full((8, 4), 0.25)
+    text_graph = build_graph(
+        features,
+        k=3,
+        backend="torch",
+        semantic_probabilities=probabilities,
+        semantic_strength=1.0,
+    )
+    assert abs(text_graph.diagnostics["mean_gate_factor"] - 1.0) < 1e-6

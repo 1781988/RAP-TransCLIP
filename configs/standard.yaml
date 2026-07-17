@@ -1,5 +1,5 @@
 project:
-  name: RAP-TransCLIP
+  name: TextGraph-TransCLIP
   seed: 1
   device: cuda
 
@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features
-  results: outputs/results
+  results: outputs/results/textgraph
   checkpoints: checkpoints
 
 datasets:
@@ -24,7 +24,7 @@ datasets:
 
 models:
   CLIP:
-    enabled: true
+    enabled: false
     backend: open_clip
     architectures:
       ViT-L-14:
@@ -62,42 +62,19 @@ feature_extraction:
 zero_shot:
   logit_scale: 100.0
 
-prompt_reliability:
-  top_fraction: 0.02
-  min_top_samples: 8
-  confidence_weight: 1.0
-  entropy_weight: 0.6
-  margin_weight: 0.7
-  agreement_weight: 0.8
-  temperature: 0.15
-  weight_ema: 0.5
-  prompt_chunk_size: 4
-  top_prompts_per_class: 0
-
-sample_reliability:
-  entropy_weight: 0.6
-  disagreement_weight: 0.4
-  minimum: 0.05
-
-active_prior:
-  enabled: true
-  ema: 0.5
-  dirichlet_alpha: 0.5
-  anchor_weight: 0.20
-  minimum_probability: 1.0e-4
-  gate_temperature: 0.05
-  peak_threshold: 0.30
-  mass_ratio_threshold: 0.20
-
 graph:
   backend: auto
-  k: 5
-  mutual: true
-  kernel: rbf
-  local_scale_rank: 5
-  reliability_weighting: true
+  k: 3
+  mutual: false
+  kernel: cosine
+  local_scale_rank: 3
   chunk_size: 2048
   minimum_similarity: 0.0
+
+text_graph:
+  semantic_strength: 1.0
+  semantic_power: 1.0
+  confidence_power: 1.0
 
 solver:
   outer_iterations: 10
@@ -107,26 +84,7 @@ solver:
   likelihood_temperature: 50.0
   covariance_floor: 1.0e-4
   prototype_topk: 8
-  use_prompt_reliability: true
-  use_active_prior: true
-  update_prompt_weights: true
   convergence_tolerance: 1.0e-5
-
-shift_gate:
-  enabled: true
-  weights:
-    effective_classes: 0.25
-    prior_divergence: 0.25
-    inactive_support: 0.50
-  threshold: 0.20
-  temperature: 0.04
-  confidence_reference: 0.25
-  confidence_temperature: 0.05
-  peak_threshold: 0.30
-  mass_ratio_threshold: 0.20
-  evidence_temperature: 0.05
-  skip_rap_below: 0.05
-  skip_rs_above: 0.95
 
 protocol:
   name: full
@@ -134,7 +92,6 @@ protocol:
 
 runtime:
   deterministic: true
-  save_assignments: false
-  save_diagnostics: false
+  save_diagnostics: true
   overwrite: false
-  experiment_tag: main
+  experiment_tag: textgraph_main

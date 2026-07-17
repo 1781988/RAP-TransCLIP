@@ -1,29 +1,34 @@
-# SA-RAP-TransCLIP
+# TextGraph-TransCLIP
 
-**Shift-Aware Reliability-Aware Prompt and Active-Prior Transduction for Zero-Shot Remote-Sensing Scene Classification**
+**Text-Guided Boundary-Preserving Graph Transduction for Zero-Shot Remote-Sensing Scene Classification**
 
-This repository studies when transductive remote-sensing VLM adaptation should be enabled. The code contains four inference modes:
+TextGraph-TransCLIP is a focused, training-free extension of RS-TransCLIP. It keeps the frozen VLM, uniform 106-prompt text prototype, Gaussian mixture, text anchor, and alternating inference unchanged. The only proposed modification is the graph:
 
-1. `zero_shot`: uniform-prompt zero-shot VLM;
-2. `rs_transclip`: reproduced RS-TransCLIP-compatible solver;
-3. `rap_transclip`: prompt-, prior-, and graph-adaptive solver;
-4. `sa_rap_transclip`: shift-aware gated selection/fusion of RS-TransCLIP and RAP-TransCLIP.
+- RS-TransCLIP propagates assignments on a visual cosine kNN graph.
+- TextGraph-TransCLIP uses zero-shot text posteriors to reduce the conductance of visually similar but semantically inconsistent edges.
+- When text predictions are uncertain, the edge gate approaches one and falls back to the original visual graph.
 
-The shift-aware method is motivated by the current empirical boundary: RAP-TransCLIP improves severe partial-class and long-tail protocols, but underperforms RS-TransCLIP on favorable full-class batches. SA-RAP estimates batch-level class-prior mismatch from unlabeled zero-shot predictions and conservatively selects or fuses the two experts.
+No dataset images or pretrained checkpoints are included.
 
-No datasets or pretrained checkpoints are included.
+## 1. Scientific question
 
-## 1. Main changes in the shift-aware version
+Remote-sensing classes often share local texture, scale, and spatial patterns. A visual kNN graph can therefore connect different semantic classes and propagate incorrect pseudo-labels. This repository tests one narrow hypothesis:
 
-- Unsupervised batch shift estimator using effective-class compression, prior divergence, missing class evidence, and a confidence guard.
-- `sa_rap_transclip` solver with RS-only, soft-fusion, and RAP-only execution branches.
-- Prompt-reliability computation in chunks rather than materializing all `[prompt, image, class]` probabilities.
-- Severe-shift component ablation script.
-- Gate threshold/temperature sensitivity script.
-- Diagnostic bundles containing gate statistics, priors, prompt weights, and assignments.
-- Three-seed protocol runner.
+> Can frozen VLM text posteriors act as boundary evidence for the visual graph and reduce cross-class propagation without changing the remaining RS-TransCLIP solver?
 
-## 2. Repository layout
+The repository intentionally does not combine prompt learning, class-prior adaptation, solver selection, or online memory with the proposed method. This keeps the contribution and ablations attributable to graph construction.
+
+## 2. Methods
+
+The supported inference methods are:
+
+- `zero_shot`: uniform-prompt zero-shot VLM;
+- `rs_transclip`: reproduced RS-TransCLIP-compatible solver with a visual graph;
+- `textgraph_transclip`: RS-TransCLIP with text-guided edge conductance.
+
+For a visual neighbor edge `(i,j)`, TextGraph uses the Hellinger affinity of the two zero-shot posterior distributions and entropy-derived node confidence. High-confidence semantic conflicts are suppressed; uncertain nodes retain the visual edge.
+
+## 3. Repository layout
 
 ```text
 RAP-TransCLIP/
@@ -31,26 +36,28 @@ RAP-TransCLIP/
 │   ├── standard.yaml
 │   ├── full_matrix.yaml
 │   └── prompts/rs106.txt
-├── datasets/
-├── checkpoints/
-├── outputs/
+├── datasets/                     # ignored by Git
+├── checkpoints/                  # ignored by Git
+├── outputs/                      # ignored by Git
 ├── paper/
-│   └── SA_RAP_TransCLIP_Chinese_Draft.md
+│   └── TextGraph_TransCLIP_Chinese_Draft.md
 ├── rap_transclip/
-│   ├── reliability.py
-│   ├── shift.py
+│   ├── graph.py
 │   ├── solver.py
-│   └── runner.py
+│   ├── runner.py
+│   └── ...
 ├── scripts/
 │   ├── run_all_standard.py
-│   ├── run_protocol_suite.py
-│   ├── run_shift_component_ablation.py
-│   ├── run_gate_sensitivity.py
-│   └── run_paper_experiments.sh
+│   ├── run_graph_ablation.py
+│   ├── run_graph_sweep.py
+│   ├── analyze_graph_edges.py
+│   └── run_textgraph_experiments.sh
 └── tests/test_smoke.py
 ```
 
-## 3. Environment
+## 4. Environment
+
+The recommended environment is Linux, Python 3.10 or 3.11, PyTorch 2.2 or newer, and a CUDA GPU.
 
 ```bash
 cd /home/user/GMY/RAP-TransCLIP
@@ -60,7 +67,7 @@ conda activate rap-transclip
 
 python -m pip install --upgrade pip setuptools wheel
 
-# Install the PyTorch build matching the server CUDA version first.
+# Install the PyTorch wheel matching the server CUDA version first.
 pip install torch torchvision
 
 pip install -e .
@@ -69,9 +76,14 @@ pip install faiss-cpu
 pytest -q
 ```
 
-The current tests cover RS-TransCLIP, RAP-TransCLIP, SA-RAP-TransCLIP, probability normalization, prompt weights, and the expected increase of the shift score when classes are removed.
+The smoke tests verify:
 
-## 4. Dataset structure
+1. RS-TransCLIP and TextGraph output valid probability distributions;
+2. `text_graph.semantic_strength=0` reproduces the RS solver;
+3. confident semantic disagreement reduces edge conductance;
+4. uncertain text predictions fall back to the visual graph.
+
+## 5. Dataset structure
 
 ```text
 datasets/
@@ -90,7 +102,7 @@ datasets/
 └── WHURS19/
 ```
 
-Build indexes:
+Build or refresh all indexes:
 
 ```bash
 for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB256 WHURS19; do
@@ -100,9 +112,9 @@ for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB2
 done
 ```
 
-## 5. Checkpoints
+## 6. GeoRSCLIP checkpoint and features
 
-Initial experiments use GeoRSCLIP ViT-L/14:
+Download the initial backbone:
 
 ```bash
 python scripts/download_checkpoints.py \
@@ -110,13 +122,13 @@ python scripts/download_checkpoints.py \
   --architectures ViT-L-14
 ```
 
-The expected file is:
+Expected checkpoint:
 
 ```text
 checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
 ```
 
-## 6. Extract features
+Extract all ten-dataset features:
 
 ```bash
 python scripts/run_all_standard.py \
@@ -126,36 +138,52 @@ python scripts/run_all_standard.py \
   --architectures ViT-L-14
 ```
 
-Features are cached under:
+Existing feature files from the previous repository version remain compatible. TextGraph inference only requires `images.pt`, `labels.pt`, and `texts_uniform.pt`.
 
-```text
-outputs/features/<dataset>/<model>/<architecture>/
-```
+## 7. Required experiment order
 
-All methods use identical cached image and text embeddings.
+### 7.1 Three-dataset pilot
 
-## 7. Run one method
+Do not begin with the full model matrix. First run:
 
 ```bash
-python scripts/run_experiment.py \
-  --config configs/standard.yaml \
-  --dataset EuroSAT \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --method sa_rap_transclip
+bash scripts/run_textgraph_experiments.sh configs/standard.yaml
 ```
 
-The result CSV contains shift diagnostics in the `diagnostics` field, including:
+Equivalent commands:
 
-- `score`;
-- `gate`;
-- `effective_class_ratio`;
-- `prior_divergence`;
-- `active_class_ratio`;
-- `mean_confidence`;
-- `solver_branch`.
+```bash
+python scripts/run_all_standard.py \
+  --config configs/standard.yaml \
+  --stage evaluate \
+  --datasets AID RESISC45 RSICB128 \
+  --models GeoRSCLIP \
+  --architectures ViT-L-14 \
+  --methods zero_shot rs_transclip textgraph_transclip
 
-## 8. Full-class comparison
+python scripts/analyze_graph_edges.py \
+  --config configs/standard.yaml \
+  --datasets AID RESISC45 RSICB128 \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14
+```
+
+Inspect:
+
+```text
+outputs/results/textgraph/raw_results.csv
+outputs/results/textgraph/graph_edge_analysis.csv
+```
+
+Recommended decision rule before continuing:
+
+- the three-dataset mean Top-1 should exceed RS-TransCLIP by at least 0.5 percentage points;
+- no pilot dataset should degrade by more than 1.0 point;
+- weighted graph purity should increase or cross-class edge weight should decrease on the datasets that improve.
+
+If these conditions fail, inspect the graph diagnostics before running more backbones.
+
+### 7.2 Ten-dataset main experiment
 
 ```bash
 python scripts/run_all_standard.py \
@@ -163,171 +191,134 @@ python scripts/run_all_standard.py \
   --stage evaluate \
   --models GeoRSCLIP \
   --architectures ViT-L-14 \
-  --methods zero_shot rs_transclip rap_transclip sa_rap_transclip
-```
+  --methods zero_shot rs_transclip textgraph_transclip
 
-This experiment tests whether SA-RAP restores the full-class performance lost by unconditional RAP adaptation.
-
-## 9. Six shift protocols, three seeds
-
-```bash
-python scripts/run_protocol_suite.py \
+python scripts/analyze_graph_edges.py \
   --config configs/standard.yaml \
   --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --methods rs_transclip rap_transclip sa_rap_transclip \
-  --seeds 1 2 3
+  --architecture ViT-L-14
 ```
 
-Protocols:
-
-- partial classes: 25%, 50%, 75%;
-- Dirichlet long tail: alpha 0.1, 0.5, 1.0.
-
-Run only the two severe protocols:
+### 7.3 Component ablation
 
 ```bash
-python scripts/run_protocol_suite.py \
+python scripts/run_graph_ablation.py \
   --config configs/standard.yaml \
   --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --methods rs_transclip rap_transclip sa_rap_transclip \
-  --seeds 1 2 3 \
-  --severe-only
+  --architecture ViT-L-14
 ```
 
-## 10. Severe-shift component ablation
+Variants:
+
+- original RS visual graph;
+- visual × semantic graph without confidence fallback;
+- full TextGraph;
+- mutual-kNN TextGraph.
+
+### 7.4 Neighborhood and conductance sweep
+
+Run the pilot sweep first:
 
 ```bash
-python scripts/run_shift_component_ablation.py \
+python scripts/run_graph_sweep.py \
   --config configs/standard.yaml \
+  --datasets AID RESISC45 RSICB128 \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --seeds 1 2 3
+  --neighbors 3 5 10 \
+  --strengths 0.25 0.50 0.75 1.0
 ```
 
-The script compares:
+Use one global parameter set. Do not tune parameters separately for each dataset.
 
-- RS-TransCLIP;
-- active prior only;
-- class-wise prompts only;
-- reliable graph only;
-- prompt + prior;
-- prior + graph;
-- full RAP;
-- shift-aware RAP.
+### 7.5 Cross-backbone validation
 
-It runs on partial-25 and long-tail alpha 0.1 because these are the regimes where the method is designed to help.
-
-## 11. Gate sensitivity
-
-Start with a reduced dataset subset:
+After freezing the graph configuration, first evaluate the four ViT-L/14 backbones:
 
 ```bash
-python scripts/run_gate_sensitivity.py \
-  --config configs/standard.yaml \
-  --datasets EuroSAT AID RESISC45 \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --thresholds 0.10 0.15 0.20 0.25 0.30 \
-  --temperatures 0.02 0.04 0.08 \
-  --seeds 1 2 3
+python scripts/run_all_standard.py \
+  --config configs/full_matrix.yaml \
+  --stage evaluate \
+  --models CLIP RemoteCLIP GeoRSCLIP SkyCLIP50 \
+  --architectures ViT-L-14 \
+  --methods rs_transclip textgraph_transclip
 ```
 
-Do not tune the threshold separately for each dataset. Select one global setting and report the complete sensitivity surface.
+Run the complete 11-architecture matrix only if the focused experiments remain stable.
 
-## 12. Paper experiment suite
+## 8. Configuration
 
-After features have been extracted:
+The main graph settings are:
 
-```bash
-bash scripts/run_paper_experiments.sh configs/standard.yaml
+```yaml
+graph:
+  k: 3
+  mutual: false
+  kernel: cosine
+
+text_graph:
+  semantic_strength: 1.0
+  semantic_power: 1.0
+  confidence_power: 1.0
 ```
 
-This runs:
+- `semantic_strength=0` exactly disables text guidance;
+- `confidence_power=0` removes uncertainty fallback;
+- `mutual=true` retains only reciprocal visual neighbor edges.
 
-1. full-class four-method comparison;
-2. all six shift protocols with three seeds;
-3. severe-shift component ablation.
+## 9. Diagnostics and paper figures
 
-Gate sensitivity is intentionally separate because it is substantially larger.
-
-## 13. Save diagnostic tensors
-
-Set in YAML:
+Set:
 
 ```yaml
 runtime:
   save_diagnostics: true
 ```
 
-or use:
-
-```bash
---override runtime.save_diagnostics=true
-```
-
-Bundles are saved under:
+Solver bundles are stored under:
 
 ```text
-outputs/results/diagnostics/
+outputs/results/textgraph/diagnostics/
 ```
 
-They contain assignments, class priors, prompt weights, sample reliability, and gate statistics for later figures.
+`analyze_graph_edges.py` reports:
 
-## 14. Memory controls
+- unweighted graph purity;
+- weighted graph purity;
+- cross-class edge-weight reduction;
+- mean semantic affinity;
+- mean text confidence;
+- mean edge gate factor.
 
-The main prompt-memory parameter is:
+Ground-truth labels are used only by this offline diagnostic script, never by the inference solver.
 
-```yaml
-prompt_reliability:
-  prompt_chunk_size: 4
-```
+## 10. Paper scope
 
-Test `16`, `8`, and `4` and report both peak memory and prediction agreement with the unchunked implementation. Smaller chunks reduce peak memory but may increase runtime.
-
-Feature extraction memory is controlled separately:
-
-```yaml
-feature_extraction:
-  batch_size: 64
-```
-
-## 15. Recommended experiment order
-
-1. Run `pytest -q`.
-2. Run EuroSAT smoke tests for all four methods.
-3. Run full-class ten-dataset comparison.
-4. Run the two severe protocols with three seeds.
-5. Run all six protocols.
-6. Run severe-shift component ablation.
-7. Run gate sensitivity on three representative datasets.
-8. Freeze the gate configuration.
-9. Run four ViT-L/14 backbones.
-10. Run the complete 11-backbone matrix only if the method remains stable.
-
-## 16. Reproducibility constraints
-
-- Ground-truth labels may construct controlled protocol subsets but must never enter the solver.
-- Use the same cached features for every method.
-- Do not select gate thresholds per dataset.
-- Keep raw per-seed results.
-- Report paired confidence intervals and corrected significance tests.
-- Record the exact AID or Million-AID Level-2 version.
-- Record the Git commit and YAML configuration for every result table.
-
-## 17. Current scientific objective
-
-The paper should not claim that RAP-TransCLIP universally improves RS-TransCLIP. The target claim is narrower:
-
-> SA-RAP-TransCLIP detects severe class-prior mismatch from unlabeled target predictions, preserves RAP's gains when the shift is strong, and falls back to RS-TransCLIP when adaptation is unnecessary.
-
-The working Chinese manuscript is:
+The manuscript is located at:
 
 ```text
-paper/SA_RAP_TransCLIP_Chinese_Draft.md
+paper/TextGraph_TransCLIP_Chinese_Draft.md
 ```
+
+The paper should emphasize:
+
+1. cross-class visual neighbors in remote-sensing embeddings;
+2. text posteriors as graph-boundary evidence;
+3. confidence-controlled fallback to the original visual graph;
+4. the relationship between weighted edge purity and classification gain;
+5. difficult-class-pair analysis and failure cases.
+
+Previous RAP/SA-RAP partial-class and long-tail experiments are not part of the TextGraph paper claim and should remain in archived result directories.
+
+## 11. Reproducibility
+
+- Use identical cached embeddings for RS and TextGraph.
+- Keep one global graph configuration across datasets.
+- Record raw CSV files, YAML configuration, and Git commit SHA.
+- Report all degraded datasets and at least one failed class-pair case.
+- Confirm the exact AID/RSICB dataset versions and class ordering.
+- Do not use labels for graph construction, model selection, or parameter tuning.
 
 ## License
 
-Code in this repository is released under the MIT License. Dataset and pretrained-model licenses remain with their original providers.
+Repository code is released under the MIT License. Dataset and pretrained-model licenses remain with their original providers.
