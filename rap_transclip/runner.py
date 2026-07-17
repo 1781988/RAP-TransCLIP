@@ -12,9 +12,8 @@ from .config import config_hash
 from .metrics import expected_calibration_error, macro_f1, top1_accuracy
 from .protocols import create_protocol
 from .solver import (
-    solve_rap_transclip,
     solve_rs_transclip,
-    solve_shift_aware_rap_transclip,
+    solve_textgraph_transclip,
     zero_shot_assignments,
 )
 from .utils import l2_normalize
@@ -70,17 +69,7 @@ def _save_solver_bundle(
         {
             "assignments": output.assignments.detach().cpu(),
             "prototypes": output.prototypes.detach().cpu(),
-            "prompt_weights": (
-                None
-                if output.prompt_weights is None
-                else output.prompt_weights.detach().cpu()
-            ),
             "class_prior": output.class_prior.detach().cpu(),
-            "sample_reliability": (
-                None
-                if output.sample_reliability is None
-                else output.sample_reliability.detach().cpu()
-            ),
             "iterations": int(output.iterations),
             "elapsed_seconds": float(output.elapsed_seconds),
             "diagnostics": output.diagnostics,
@@ -102,19 +91,18 @@ def run_experiment(
     if device_name.startswith("cuda") and not torch.cuda.is_available():
         device_name = "cpu"
     device = torch.device(device_name)
+
     feature_dir = (
         Path(cfg["paths"]["features"])
         / dataset_name
         / model_name
         / architecture
     )
-
     images = _load_tensor(feature_dir / "images.pt", device)
     labels = torch.load(
         feature_dir / "labels.pt",
         map_location="cpu",
     ).long()
-    texts_all = _load_tensor(feature_dir / "texts_all.pt", device)
     texts_uniform = _load_tensor(
         feature_dir / "texts_uniform.pt",
         device,
@@ -132,9 +120,9 @@ def run_experiment(
         seed,
         **(protocol_args or {}),
     )
-    idx_cpu = protocol.indices.long()
-    images = images[idx_cpu.to(device)]
-    labels = labels[idx_cpu].to(device)
+    indices = protocol.indices.long()
+    images = images[indices.to(device)]
+    labels = labels[indices].to(device)
 
     if torch.cuda.is_available() and device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -149,29 +137,15 @@ def run_experiment(
         )
         solver_time = time.perf_counter() - started
         iterations = 0
-        diagnostics = {}
+        diagnostics: dict[str, object] = {}
     elif method == "rs_transclip":
         output = solve_rs_transclip(images, texts_uniform, cfg)
         probabilities = output.assignments
         solver_time = output.elapsed_seconds
         iterations = output.iterations
         diagnostics = output.diagnostics
-    elif method == "rap_transclip":
-        output = solve_rap_transclip(images, texts_all, cfg)
-        probabilities = output.assignments
-        solver_time = output.elapsed_seconds
-        iterations = output.iterations
-        diagnostics = output.diagnostics
-    elif method in {
-        "sa_rap_transclip",
-        "shift_aware_rap_transclip",
-    }:
-        output = solve_shift_aware_rap_transclip(
-            images,
-            texts_all,
-            texts_uniform,
-            cfg,
-        )
+    elif method in {"textgraph_transclip", "text_graph_transclip"}:
+        output = solve_textgraph_transclip(images, texts_uniform, cfg)
         probabilities = output.assignments
         solver_time = output.elapsed_seconds
         iterations = output.iterations
@@ -197,23 +171,6 @@ def run_experiment(
             seed,
             output,
         )
-    elif (
-        output is not None
-        and runtime_cfg.get("save_assignments", False)
-    ):
-        assignment_dir = Path(cfg["paths"]["results"]) / "assignments"
-        assignment_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            probabilities.detach().cpu(),
-            assignment_dir
-            / (
-                f"{_safe_name(dataset_name)}_"
-                f"{_safe_name(model_name)}_"
-                f"{_safe_name(architecture)}_"
-                f"{_safe_name(method)}_"
-                f"{_safe_name(protocol_name)}_seed{seed}.pt"
-            ),
-        )
 
     row = {
         "dataset": dataset_name,
@@ -222,9 +179,9 @@ def run_experiment(
         "method": method,
         "protocol": protocol_name,
         "experiment_tag": str(runtime_cfg.get("experiment_tag", "main")),
-        "seed": int(cfg["project"].get("seed", seed)),
+        "seed": seed,
         "num_samples": int(len(labels)),
-        "num_candidate_classes": int(texts_all.shape[1]),
+        "num_candidate_classes": int(texts_uniform.shape[0]),
         "top1": round(top1_accuracy(probabilities, labels), 4),
         "macro_f1": round(macro_f1(probabilities, labels), 4),
         "ece": round(expected_calibration_error(probabilities, labels), 4),
