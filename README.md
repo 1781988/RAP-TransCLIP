@@ -1,108 +1,144 @@
-# TextGraph-TransCLIP
+# ObjectContext-CLIP
 
-**Text-Guided Boundary-Preserving Graph Transduction for Zero-Shot Remote-Sensing Scene Classification**
+**Training-Free Multi-Scale Object–Context Collaborative Inference for Zero-Shot Remote-Sensing Scene Classification**
 
-TextGraph-TransCLIP is a focused, training-free extension of RS-TransCLIP. It keeps the frozen VLM, uniform 106-prompt text prototype, Gaussian mixture, text anchor, and alternating inference unchanged. The only proposed modification is the graph:
+This repository is the active codebase for a new direction that is independent of RS-TransCLIP transductive optimization. The repository name is retained for continuity, but the current scientific framework is **ObjectContext-CLIP**.
 
-- RS-TransCLIP propagates assignments on a visual cosine kNN graph.
-- TextGraph-TransCLIP uses zero-shot text posteriors to reduce the conductance of visually similar but semantically inconsistent edges.
-- When text predictions are uncertain, the edge gate approaches one and falls back to the original visual graph.
+The method studies a concrete remote-sensing problem:
 
-No dataset images or pretrained checkpoints are included.
+- global image features preserve scene layout and surrounding context;
+- deterministic local crops preserve small objects and fine structures;
+- class text is factorized into context descriptions and local object/structure cues;
+- an evidence-adaptive fusion rule balances the two branches without target training.
 
-## 1. Scientific question
+The image and text encoders remain frozen. Every image is classified independently; no transductive test collection is required.
 
-Remote-sensing classes often share local texture, scale, and spatial patterns. A visual kNN graph can therefore connect different semantic classes and propagate incorrect pseudo-labels. This repository tests one narrow hypothesis:
+## 1. Main methods
 
-> Can frozen VLM text posteriors act as boundary evidence for the visual graph and reduce cross-class propagation without changing the remaining RS-TransCLIP solver?
+The evaluation framework provides six controlled methods:
 
-The repository intentionally does not combine prompt learning, class-prior adaptation, solver selection, or online memory with the proposed method. This keeps the contribution and ablations attributable to graph construction.
+1. `global_classname`: whole-image zero-shot classification with class-name prompts;
+2. `multicrop_classname`: global and local views matched to the same class-name prompts;
+3. `global_context`: whole-image classification with class names plus scene-context descriptions;
+4. `object_only`: local crops matched to class-specific object/structure cues;
+5. `fixed_object_context`: fixed fusion of context and object evidence;
+6. `object_context`: evidence-adaptive object–context collaboration.
 
-## 2. Methods
+The critical comparison is not against RS-TransCLIP. It is:
 
-The supported inference methods are:
+```text
+ObjectContext-CLIP
+vs.
+global zero-shot
+vs.
+simple multi-crop zero-shot
+vs.
+context-only and object-only controls
+```
 
-- `zero_shot`: uniform-prompt zero-shot VLM;
-- `rs_transclip`: reproduced RS-TransCLIP-compatible solver with a visual graph;
-- `textgraph_transclip`: RS-TransCLIP with text-guided edge conductance.
-
-For a visual neighbor edge `(i,j)`, TextGraph uses the Hellinger affinity of the two zero-shot posterior distributions and entropy-derived node confidence. High-confidence semantic conflicts are suppressed; uncertain nodes retain the visual edge.
-
-## 3. Repository layout
+## 2. Repository layout
 
 ```text
 RAP-TransCLIP/
 ├── configs/
 │   ├── standard.yaml
 │   ├── full_matrix.yaml
-│   └── prompts/rs106.txt
-├── datasets/                     # ignored by Git
-├── checkpoints/                  # ignored by Git
-├── outputs/                      # ignored by Git
+│   └── concepts/
+│       └── common_remote_sensing.yaml
+├── datasets/
+├── checkpoints/
+├── outputs/
 ├── paper/
-│   └── TextGraph_TransCLIP_Chinese_Draft.md
+│   └── ObjectContext_CLIP_Chinese_Draft.md
 ├── rap_transclip/
-│   ├── graph.py
-│   ├── solver.py
+│   ├── concepts.py
+│   ├── data.py
+│   ├── feature_extraction.py
+│   ├── multiview.py
+│   ├── object_context.py
 │   ├── runner.py
 │   └── ...
 ├── scripts/
+│   ├── build_index.py
+│   ├── build_concept_bank.py
+│   ├── download_checkpoints.py
 │   ├── run_all_standard.py
-│   ├── run_graph_ablation.py
-│   ├── run_graph_sweep.py
-│   ├── analyze_graph_edges.py
-│   └── run_textgraph_experiments.sh
-└── tests/test_smoke.py
+│   ├── run_object_context_suite.py
+│   ├── run_resolution_suite.py
+│   └── summarize_results.py
+└── tests/
 ```
 
-## 4. Environment
+The Python package name `rap_transclip` is temporarily retained to avoid breaking existing dataset/checkpoint utilities. It no longer denotes the active paper method.
 
-The recommended environment is Linux, Python 3.10 or 3.11, PyTorch 2.2 or newer, and a CUDA GPU.
+## 3. Environment
+
+Recommended:
+
+- Linux;
+- Python 3.10 or 3.11;
+- CUDA GPU;
+- PyTorch matching the server CUDA driver;
+- `open-clip-torch`.
 
 ```bash
 cd /home/user/GMY/RAP-TransCLIP
 
-conda create -n rap-transclip python=3.10 -y
 conda activate rap-transclip
-
 python -m pip install --upgrade pip setuptools wheel
 
-# Install the PyTorch wheel matching the server CUDA version first.
+# Install the correct CUDA build of torch/torchvision first.
 pip install torch torchvision
 
 pip install -e .
-pip install faiss-cpu
+pip install faiss-cpu   # optional; not required by ObjectContext-CLIP
 
 pytest -q
 ```
 
-The smoke tests verify:
+CLI:
 
-1. RS-TransCLIP and TextGraph output valid probability distributions;
-2. `text_graph.semantic_strength=0` reproduces the RS solver;
-3. confident semantic disagreement reduces edge conductance;
-4. uncertain text predictions fall back to the visual graph.
-
-## 5. Dataset structure
-
-```text
-datasets/
-├── AID/
-│   ├── classes.txt
-│   ├── class_changes.txt
-│   └── images/
-├── EuroSAT/
-├── MLRSNet/
-├── OPTIMAL31/
-├── PatternNet/
-├── RESISC45/
-├── RSC11/
-├── RSICB128/
-├── RSICB256/
-└── WHURS19/
+```bash
+object-context-clip --help
 ```
 
-Build or refresh all indexes:
+## 4. Dataset structure
+
+Existing ten-dataset folders can be reused:
+
+```text
+datasets/<DATASET>/
+├── classes.txt
+├── class_changes.txt
+└── images/
+```
+
+Supported first-party experiment names:
+
+```text
+AID
+EuroSAT
+MLRSNet
+OPTIMAL31
+PatternNet
+RESISC45
+RSC11
+RSICB128
+RSICB256
+WHURS19
+```
+
+Build indexes for the pilot datasets:
+
+```bash
+for d in AID PatternNet RESISC45; do
+  python scripts/build_index.py \
+    --dataset "$d" \
+    --config configs/standard.yaml
+done
+```
+
+Build all indexes:
 
 ```bash
 for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB256 WHURS19; do
@@ -112,9 +148,9 @@ for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB2
 done
 ```
 
-## 6. GeoRSCLIP checkpoint and features
+## 5. Pretrained backbone
 
-Download the initial backbone:
+The first experiment uses GeoRSCLIP ViT-L/14:
 
 ```bash
 python scripts/download_checkpoints.py \
@@ -128,197 +164,233 @@ Expected checkpoint:
 checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
 ```
 
-Extract all ten-dataset features:
+## 6. Concept bank
+
+The released common knowledge file is:
+
+```text
+configs/concepts/common_remote_sensing.yaml
+```
+
+Each class entry may contain:
+
+```yaml
+airport:
+  group: object
+  context:
+    - an airport complex with long paved runways, taxiways, aprons, and terminal areas
+  objects:
+    - runway
+    - airplane
+    - taxiway
+    - airport terminal
+```
+
+`group` is only used for analysis; it is not fed into the adaptive fusion rule.
+
+Dataset-specific overrides are optional:
+
+```text
+configs/concepts/AID.yaml
+configs/concepts/PatternNet.yaml
+configs/concepts/RESISC45.yaml
+```
+
+Preview the resolved concept bank:
+
+```bash
+python scripts/build_concept_bank.py \
+  --config configs/standard.yaml \
+  --dataset AID
+```
+
+Output:
+
+```text
+outputs/results/object_context/concept_banks/AID.json
+```
+
+Classes not covered by the common file receive deterministic fallback descriptions. Before paper experiments, inspect all fallback entries and add reproducible dataset-specific corrections when needed.
+
+## 7. Multi-scale features
+
+Default local views:
+
+- crop scales: 0.50 and 0.75;
+- positions: center and four corners;
+- ten local crops per image;
+- one whole-image global view.
+
+Features are stored under a separate root and do not overwrite previous RS/TextGraph features:
+
+```text
+outputs/features_object_context/
+└── <dataset>/<model>/<architecture>/<variant>/
+    ├── global_images.pt
+    ├── local_images.pt
+    ├── labels.pt
+    ├── class_texts.pt
+    ├── context_texts.pt
+    ├── object_texts.pt
+    ├── object_mask.pt
+    ├── concept_bank.json
+    └── metadata.json
+```
+
+Feature extraction is substantially more expensive than global CLIP inference because every image is encoded in multiple deterministic crops.
+
+Extract one dataset:
 
 ```bash
 python scripts/run_all_standard.py \
   --config configs/standard.yaml \
   --stage features \
+  --datasets AID \
   --models GeoRSCLIP \
   --architectures ViT-L-14
 ```
 
-Existing feature files from the previous repository version remain compatible. TextGraph inference only requires `images.pt`, `labels.pt`, and `texts_uniform.pt`.
-
-## 7. Required experiment order
-
-### 7.1 Three-dataset pilot
-
-Do not begin with the full model matrix. First run:
+For memory pressure, reduce:
 
 ```bash
-bash scripts/run_textgraph_experiments.sh configs/standard.yaml
+--override feature_extraction.batch_size=8
 ```
 
-Equivalent commands:
+## 8. Pilot experiment
+
+Run AID, PatternNet, and RESISC45:
 
 ```bash
-python scripts/run_all_standard.py \
+python scripts/run_object_context_suite.py \
   --config configs/standard.yaml \
-  --stage evaluate \
-  --datasets AID RESISC45 RSICB128 \
-  --models GeoRSCLIP \
-  --architectures ViT-L-14 \
-  --methods zero_shot rs_transclip textgraph_transclip
-
-python scripts/analyze_graph_edges.py \
-  --config configs/standard.yaml \
-  --datasets AID RESISC45 RSICB128 \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14
-```
-
-Inspect:
-
-```text
-outputs/results/textgraph/raw_results.csv
-outputs/results/textgraph/graph_edge_analysis.csv
-```
-
-Recommended decision rule before continuing:
-
-- the three-dataset mean Top-1 should exceed RS-TransCLIP by at least 0.5 percentage points;
-- no pilot dataset should degrade by more than 1.0 point;
-- weighted graph purity should increase or cross-class edge weight should decrease on the datasets that improve.
-
-If these conditions fail, inspect the graph diagnostics before running more backbones.
-
-### 7.2 Ten-dataset main experiment
-
-```bash
-python scripts/run_all_standard.py \
-  --config configs/standard.yaml \
-  --stage evaluate \
-  --models GeoRSCLIP \
-  --architectures ViT-L-14 \
-  --methods zero_shot rs_transclip textgraph_transclip
-
-python scripts/analyze_graph_edges.py \
-  --config configs/standard.yaml \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14
-```
-
-### 7.3 Component ablation
-
-```bash
-python scripts/run_graph_ablation.py \
-  --config configs/standard.yaml \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14
-```
-
-Variants:
-
-- original RS visual graph;
-- visual × semantic graph without confidence fallback;
-- full TextGraph;
-- mutual-kNN TextGraph.
-
-### 7.4 Neighborhood and conductance sweep
-
-Run the pilot sweep first:
-
-```bash
-python scripts/run_graph_sweep.py \
-  --config configs/standard.yaml \
-  --datasets AID RESISC45 RSICB128 \
+  --datasets AID PatternNet RESISC45 \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --neighbors 3 5 10 \
-  --strengths 0.25 0.50 0.75 1.0
+  --stage all \
+  2>&1 | tee logs/object_context_pilot.log
 ```
 
-Use one global parameter set. Do not tune parameters separately for each dataset.
+If the features have already been extracted:
 
-### 7.5 Cross-backbone validation
+```bash
+python scripts/run_object_context_suite.py \
+  --config configs/standard.yaml \
+  --datasets AID PatternNet RESISC45 \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14 \
+  --stage evaluate \
+  2>&1 | tee logs/object_context_pilot_eval.log
+```
 
-After freezing the graph configuration, first evaluate the four ViT-L/14 backbones:
+Results:
+
+```text
+outputs/results/object_context/raw_results.csv
+outputs/results/object_context/predictions/
+```
+
+Summarize:
+
+```bash
+python scripts/summarize_results.py \
+  --input outputs/results/object_context/raw_results.csv \
+  --output outputs/results/object_context/summary.csv
+```
+
+## 9. Pilot decision criteria
+
+Do not immediately run all ten datasets. Continue only when the pilot shows:
+
+1. `object_context` improves over `global_classname` by at least 1.0 point on average;
+2. `object_context` improves over `multicrop_classname` by at least 0.5 point on average;
+3. at least two of the three datasets improve;
+4. object-driven classes benefit more than context-driven classes;
+5. adaptive fusion differs meaningfully from fixed fusion.
+
+If the method beats global zero-shot but not simple multi-crop, the current semantic factorization is not yet sufficient.
+
+## 10. Full ten-dataset experiment
+
+After freezing the concept bank and all inference parameters:
 
 ```bash
 python scripts/run_all_standard.py \
+  --config configs/standard.yaml \
+  --stage all \
+  --models GeoRSCLIP \
+  --architectures ViT-L-14 \
+  --methods \
+    global_classname \
+    multicrop_classname \
+    global_context \
+    object_only \
+    fixed_object_context \
+    object_context \
+  2>&1 | tee logs/object_context_ten_datasets.log
+```
+
+## 11. Resolution robustness
+
+The script creates separate feature variants for clean, 2x, 4x, and 8x downsampling:
+
+```bash
+python scripts/run_resolution_suite.py \
+  --config configs/standard.yaml \
+  --datasets AID PatternNet RESISC45 \
+  --model GeoRSCLIP \
+  --architecture ViT-L-14 \
+  --factors 1 2 4 8 \
+  2>&1 | tee logs/object_context_resolution.log
+```
+
+Output rows are distinguished by `feature_variant`.
+
+## 12. Cross-backbone validation
+
+Enable all ViT-L/14 backbones in `configs/full_matrix.yaml`, download their checkpoints, then run:
+
+```bash
+python scripts/download_checkpoints.py \
+  --models RemoteCLIP GeoRSCLIP SkyCLIP50
+
+python scripts/run_all_standard.py \
   --config configs/full_matrix.yaml \
-  --stage evaluate \
+  --stage all \
+  --datasets AID PatternNet RESISC45 \
   --models CLIP RemoteCLIP GeoRSCLIP SkyCLIP50 \
   --architectures ViT-L-14 \
-  --methods rs_transclip textgraph_transclip
+  --methods global_classname multicrop_classname object_context
 ```
 
-Run the complete 11-architecture matrix only if the focused experiments remain stable.
+Do not run the full matrix until the pilot succeeds.
 
-## 8. Configuration
+## 13. Important experimental controls
 
-The main graph settings are:
+The paper must include:
 
-```yaml
-graph:
-  k: 3
-  mutual: false
-  kernel: cosine
+- global class-name zero-shot;
+- simple multi-crop class-name baseline;
+- context-only branch;
+- object-only branch;
+- fixed fusion;
+- adaptive fusion;
+- shuffled object-concept negative control;
+- scale and crop-count ablation;
+- object/context/mixed class-group analysis;
+- runtime, memory, and feature-cache size.
 
-text_graph:
-  semantic_strength: 1.0
-  semantic_power: 1.0
-  confidence_power: 1.0
-```
+All methods must use the same frozen backbone and deterministic views.
 
-- `semantic_strength=0` exactly disables text guidance;
-- `confidence_power=0` removes uncertainty fallback;
-- `mutual=true` retains only reciprocal visual neighbor edges.
+## 14. Paper
 
-## 9. Diagnostics and paper figures
-
-Set:
-
-```yaml
-runtime:
-  save_diagnostics: true
-```
-
-Solver bundles are stored under:
+The active Chinese manuscript is:
 
 ```text
-outputs/results/textgraph/diagnostics/
+paper/ObjectContext_CLIP_Chinese_Draft.md
 ```
 
-`analyze_graph_edges.py` reports:
+The manuscript contains no invented ObjectContext-CLIP numbers. Fill tables only from the generated CSV files.
 
-- unweighted graph purity;
-- weighted graph purity;
-- cross-class edge-weight reduction;
-- mean semantic affinity;
-- mean text confidence;
-- mean edge gate factor.
+## 15. License
 
-Ground-truth labels are used only by this offline diagnostic script, never by the inference solver.
-
-## 10. Paper scope
-
-The manuscript is located at:
-
-```text
-paper/TextGraph_TransCLIP_Chinese_Draft.md
-```
-
-The paper should emphasize:
-
-1. cross-class visual neighbors in remote-sensing embeddings;
-2. text posteriors as graph-boundary evidence;
-3. confidence-controlled fallback to the original visual graph;
-4. the relationship between weighted edge purity and classification gain;
-5. difficult-class-pair analysis and failure cases.
-
-Previous RAP/SA-RAP partial-class and long-tail experiments are not part of the TextGraph paper claim and should remain in archived result directories.
-
-## 11. Reproducibility
-
-- Use identical cached embeddings for RS and TextGraph.
-- Keep one global graph configuration across datasets.
-- Record raw CSV files, YAML configuration, and Git commit SHA.
-- Report all degraded datasets and at least one failed class-pair case.
-- Confirm the exact AID/RSICB dataset versions and class ordering.
-- Do not use labels for graph construction, model selection, or parameter tuning.
-
-## License
-
-Repository code is released under the MIT License. Dataset and pretrained-model licenses remain with their original providers.
+Repository code is MIT licensed. Dataset and pretrained-model licenses remain with their respective owners.
