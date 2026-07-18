@@ -1,0 +1,134 @@
+project:
+  name: ObjectContext-CLIP
+  seed: 1
+  device: cuda
+
+paths:
+  datasets: datasets
+  indexes: outputs/indexes
+  features: outputs/features_object_context
+  results: outputs/results/object_context_paper_v1
+  checkpoints: checkpoints
+
+# AID, PatternNet, and RESISC45 were used for method development and ablation.
+# The remaining seven datasets are held out as frozen-configuration validation.
+paper_protocol:
+  development_datasets: [AID, PatternNet, RESISC45]
+  validation_datasets: [EuroSAT, MLRSNet, OPTIMAL31, RSC11, RSICB128, RSICB256, WHURS19]
+  all_datasets: [AID, EuroSAT, MLRSNet, OPTIMAL31, PatternNet, RESISC45, RSC11, RSICB128, RSICB256, WHURS19]
+  primary_model: GeoRSCLIP
+  primary_architecture: ViT-L-14
+  cross_backbone_models: [CLIP, RemoteCLIP, GeoRSCLIP, SkyCLIP50]
+  cross_backbone_architecture: ViT-L-14
+
+datasets:
+  - AID
+  - EuroSAT
+  - MLRSNet
+  - OPTIMAL31
+  - PatternNet
+  - RESISC45
+  - RSC11
+  - RSICB128
+  - RSICB256
+  - WHURS19
+
+models:
+  CLIP:
+    enabled: false
+    backend: open_clip
+    architectures:
+      ViT-L-14:
+        pretrained: openai
+        checkpoint: null
+  RemoteCLIP:
+    enabled: false
+    backend: open_clip_checkpoint
+    architectures:
+      ViT-L-14:
+        pretrained: null
+        checkpoint: checkpoints/RemoteCLIP/RemoteCLIP-ViT-L-14.pt
+  GeoRSCLIP:
+    enabled: true
+    backend: open_clip_checkpoint
+    architectures:
+      ViT-L-14:
+        pretrained: null
+        checkpoint: checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
+  SkyCLIP50:
+    enabled: false
+    backend: open_clip_checkpoint
+    architectures:
+      ViT-L-14:
+        pretrained: null
+        checkpoint: checkpoints/SkyCLIP50/SkyCLIP_ViT_L14_top50pct_epoch_20.pt
+
+feature_extraction:
+  batch_size: 8
+  num_workers: 8
+  amp: true
+  storage_dtype: float16
+  variant: clean
+  downsample_factor: 1
+  image_extensions: [.jpg, .jpeg, .png, .tif, .tiff, .bmp, .webp]
+
+local_views:
+  scales: [0.50, 0.75]
+  positions: [center, top_left, top_right, bottom_left, bottom_right]
+
+concept_bank:
+  common_knowledge: configs/concepts/common_remote_sensing.yaml
+  dataset_override_pattern: configs/concepts/{dataset}.yaml
+
+semantic_prompts:
+  batch_size: 256
+  class_templates:
+    - "a satellite image of {text}"
+    - "an aerial image of {text}"
+    - "a remote sensing scene of {text}"
+  context_templates:
+    - "{text}"
+    - "a satellite image showing {text}"
+    - "an aerial view characterized by {text}"
+  object_templates:
+    - "a close-up aerial view of {text}"
+    - "a remote sensing crop containing {text}"
+    - "a local image patch showing {text}"
+
+# Frozen v2 inference parameters. Do not tune these using the seven validation datasets.
+inference:
+  class_name_weight: 0.50
+  local_topk: 2
+  multicrop_local_weight: 0.50
+  object_topk: 2
+  object_view_topk: 2
+  class_consensus_view_topk: 2
+  class_consensus_center: 0.0
+  class_consensus_temperature: 0.50
+  consensus_power: 1.0
+  class_consensus_power: 1.0
+  object_concept_mode: correct
+  concept_shuffle_seed: 17
+  fixed_object_weight: 0.50
+  score_chunk_size: 128
+  global_temperature: 0.01
+  fusion_temperature: 0.20
+  context_margin_center: 0.10
+  object_margin_center: 0.10
+  margin_temperature: 0.10
+  reliability_temperature: 0.20
+  context_bias: 0.15
+  class_gate_center: 0.0
+  class_gate_temperature: 0.50
+  max_object_weight: 0.85
+
+runtime:
+  save_predictions: true
+  overwrite: false
+  experiment_tag: paper_main_georsclip
+
+analysis:
+  bootstrap_repetitions: 2000
+  bootstrap_seed: 2027
+  confidence_level: 0.95
+  severe_dataset_drop_threshold: -5.0
