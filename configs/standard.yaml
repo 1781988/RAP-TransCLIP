@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features_object_context
-  results: outputs/results/object_context
+  results: outputs/results/object_context_refined_v2
   checkpoints: checkpoints
 
 datasets:
