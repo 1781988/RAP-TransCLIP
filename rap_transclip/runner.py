@@ -45,6 +45,30 @@ def _safe_name(value: str) -> str:
     return value.replace("/", "-").replace("\\", "-").replace(" ", "_")
 
 
+def _select_local_views(
+    local_features: torch.Tensor,
+    configured_indices: Any,
+) -> tuple[torch.Tensor, list[int]]:
+    view_count = int(local_features.shape[1])
+    if configured_indices is None:
+        indices = list(range(view_count))
+        return local_features, indices
+    if not isinstance(configured_indices, (list, tuple)):
+        raise TypeError("inference.local_view_indices must be a list of integers")
+    indices = [int(value) for value in configured_indices]
+    if not indices:
+        raise ValueError("inference.local_view_indices cannot be empty")
+    if len(indices) != len(set(indices)):
+        raise ValueError("inference.local_view_indices must not contain duplicates")
+    invalid = [index for index in indices if index < 0 or index >= view_count]
+    if invalid:
+        raise IndexError(
+            f"Local-view indices {invalid} are outside [0, {view_count - 1}]"
+        )
+    index_tensor = torch.tensor(indices, device=local_features.device)
+    return local_features.index_select(1, index_tensor), indices
+
+
 def _prepare_object_concepts(
     object_texts: torch.Tensor,
     object_mask: torch.Tensor,
@@ -154,6 +178,10 @@ def run_experiment(
     ).bool()
 
     inference_cfg = cfg.get("inference", {})
+    local_features, selected_view_indices = _select_local_views(
+        local_features,
+        inference_cfg.get("local_view_indices"),
+    )
     concept_mode = str(inference_cfg.get("object_concept_mode", "correct"))
     object_texts, object_mask, concept_diagnostics = _prepare_object_concepts(
         object_texts,
@@ -189,7 +217,11 @@ def run_experiment(
     experiment_tag = str(
         runtime_cfg.get("experiment_tag", "object_context")
     )
-    diagnostics = {**output.diagnostics, **concept_diagnostics}
+    diagnostics = {
+        **output.diagnostics,
+        **concept_diagnostics,
+        "selected_local_view_indices": selected_view_indices,
+    }
     row = {
         "dataset": dataset_name,
         "model": model_name,
@@ -202,6 +234,7 @@ def run_experiment(
         "class_consensus_view_topk": int(
             inference_cfg.get("class_consensus_view_topk", 2)
         ),
+        "local_view_indices": ",".join(str(item) for item in selected_view_indices),
         "num_samples": int(len(labels)),
         "num_classes": int(class_texts.shape[0]),
         "num_local_views": int(local_features.shape[1]),
@@ -250,6 +283,7 @@ def run_experiment(
                 "diagnostics": diagnostics,
                 "experiment_tag": experiment_tag,
                 "object_concept_mode": concept_mode,
+                "local_view_indices": selected_view_indices,
             },
             prediction_dir / f"{stem}.pt",
         )

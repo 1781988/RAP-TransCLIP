@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from rap_transclip.multiview import build_view_specs
@@ -9,6 +10,7 @@ from rap_transclip.object_context import (
     object_evidence_scores,
     run_object_context_inference,
 )
+from rap_transclip.runner import _select_local_views
 from rap_transclip.utils import l2_normalize
 
 
@@ -88,6 +90,17 @@ def test_view_specs_are_deterministic():
         "s0p75_center",
         "s0p75_top_left",
     ]
+
+
+def test_cached_local_view_subset_selection():
+    local = torch.arange(2 * 4 * 3).view(2, 4, 3)
+    selected, indices = _select_local_views(local, [0, 2])
+    assert indices == [0, 2]
+    assert selected.shape == (2, 2, 3)
+    assert torch.equal(selected[:, 0], local[:, 0])
+    assert torch.equal(selected[:, 1], local[:, 2])
+    with pytest.raises(IndexError):
+        _select_local_views(local, [4])
 
 
 def test_object_scores_have_expected_shape():

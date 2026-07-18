@@ -2,126 +2,122 @@
 
 **Training-Free Multi-Scale Object–Context Collaborative Inference for Zero-Shot Remote-Sensing Scene Classification**
 
-This repository is the active implementation of **ObjectContext-CLIP**. The repository name is retained only for continuity with earlier experiments; the current method is independent of RS-TransCLIP transductive optimization.
+This repository contains the active ObjectContext-CLIP implementation. The repository name is retained for continuity with earlier experiments; the current paper is independent of RS-TransCLIP transductive optimization.
 
-ObjectContext-CLIP studies a remote-sensing classification problem that is not well represented by a single whole-image feature:
+ObjectContext-CLIP combines:
 
-- global image features preserve scene layout and surrounding context;
-- deterministic local crops preserve small objects and fine structures;
-- class text is factorized into scene-context descriptions and local object/structure cues;
-- an evidence-adaptive fusion rule combines the two branches without target training.
+- one whole-image feature for scene layout and environmental context;
+- deterministic multi-scale local crops for small objects and fine structures;
+- class-specific context descriptions and local object/structure cues;
+- evidence-adaptive fusion without target-data training.
 
-The image and text encoders remain frozen. Every image is classified independently.
+The image and text encoders remain frozen and every image is classified independently.
 
-## 1. Controlled inference methods
+## 1. Controlled methods
 
-The evaluation framework provides six methods:
+The framework provides six controlled methods:
 
-1. `global_classname`: whole-image zero-shot classification using class-name prompts;
+1. `global_classname`: whole-image zero-shot classification with class-name prompts;
 2. `multicrop_classname`: whole-image and local views matched to the same class-name prompts;
-3. `global_context`: whole-image classification using class names and scene-context descriptions;
+3. `global_context`: whole-image classification with class names and scene-context descriptions;
 4. `object_only`: local crops matched to class-specific object/structure cues;
-5. `fixed_object_context`: fixed fusion of context and object evidence;
-6. `object_context`: adaptive object–context collaboration.
+5. `fixed_object_context`: fixed context/object fusion;
+6. `object_context`: adaptive ObjectContext-CLIP inference.
 
-The critical comparison is:
+The critical comparison is not against RS-TransCLIP. It is ObjectContext-CLIP versus whole-image zero-shot, simple multi-crop inference, context-only inference, object-only inference, and fixed fusion.
+
+## 2. Frozen v2 method
+
+The paper configuration is fixed in:
 
 ```text
-ObjectContext-CLIP
-vs. global zero-shot
-vs. simple multi-crop zero-shot
-vs. context-only and object-only controls
-vs. fixed fusion
+configs/paper.yaml
 ```
 
-## 2. Refined v2 inference
-
-The first pilot showed meaningful average gains but also exposed two weaknesses: a single local crop could dominate one cue, and the previous view-consensus statistic was shared by all classes. The refined implementation makes three targeted changes.
-
-### 2.1 Multi-view cue pooling
-
-For each class-specific cue, the score is averaged over the strongest `object_view_topk` local crops instead of taking one hard maximum. The default is:
+The v2 method uses:
 
 ```yaml
 inference:
+  object_topk: 2
   object_view_topk: 2
-```
-
-This reduces accidental high responses from one crop.
-
-### 2.2 Class-specific view consensus
-
-Every candidate class receives its own multi-view support score. The adaptive route uses this score both for branch reliability and class-level gating:
-
-```yaml
-inference:
   class_consensus_view_topk: 2
-  class_consensus_center: 0.0
-  class_consensus_temperature: 0.50
   consensus_power: 1.0
   class_consensus_power: 1.0
+  object_concept_mode: correct
 ```
 
-### 2.3 Concept-bank negative controls
+For every local cue, evidence is averaged over the strongest two local views instead of using one hard maximum. Every candidate class also receives its own multi-view consensus score. The frozen configuration must not be tuned using the seven validation datasets.
 
-The runner supports three deterministic object-concept modes without re-encoding images:
+## 3. Development and validation protocol
 
-```yaml
-inference:
-  object_concept_mode: correct   # correct | shuffled | generic
-  concept_shuffle_seed: 17
+The three pilot datasets were used for method development and ablation:
+
+```text
+AID
+PatternNet
+RESISC45
 ```
 
-- `correct`: use the released class-specific cue bank;
-- `shuffled`: circularly permute cue banks across classes;
-- `generic`: replace all class-specific cues with one global generic cue prototype.
+The following seven datasets are held out for frozen-configuration validation:
 
-Correct concepts must outperform these controls before the paper claims that local semantic factorization is effective.
+```text
+EuroSAT
+MLRSNet
+OPTIMAL31
+RSC11
+RSICB128
+RSICB256
+WHURS19
+```
 
-## 3. Repository layout
+All ten datasets are reported in the final main table, but the paper explicitly distinguishes development results from independent validation results.
+
+### Completed three-dataset pilot
+
+| Method | AID | PatternNet | RESISC45 | Average |
+|---|---:|---:|---:|---:|
+| Global-ClassName | 72.6400 | 76.5592 | 73.4095 | 74.2029 |
+| MultiCrop-ClassName | 73.4800 | 74.6579 | 73.8730 | 74.0036 |
+| Global-Context | 71.6300 | 79.0757 | 77.0825 | 75.9294 |
+| Object-Only | 65.1000 | 60.1579 | 65.9651 | 63.7410 |
+| Fixed Object-Context | 72.6600 | 76.1776 | 78.0825 | 75.6400 |
+| **ObjectContext-CLIP** | **73.2500** | **77.4046** | **78.5746** | **76.4097** |
+
+Average gains are +2.2068 over Global-ClassName, +2.4061 over MultiCrop-ClassName, +0.4803 over Global-Context, and +0.7697 over fixed fusion. Correct local concepts outperform shuffled concepts by 3.5365 points. These results justify frozen validation, but they do not establish universal class-level improvement; several classes still degrade substantially.
+
+## 4. Repository layout
 
 ```text
 RAP-TransCLIP/
 ├── configs/
+│   ├── paper.yaml
 │   ├── standard.yaml
 │   ├── full_matrix.yaml
 │   └── concepts/
-│       └── common_remote_sensing.yaml
-├── datasets/
-├── checkpoints/
-├── outputs/
 ├── paper/
 │   └── ObjectContext_CLIP_Chinese_Draft.md
 ├── rap_transclip/
-│   ├── concepts.py
-│   ├── data.py
 │   ├── feature_extraction.py
-│   ├── multiview.py
 │   ├── object_context.py
 │   ├── runner.py
 │   └── ...
 ├── scripts/
-│   ├── build_index.py
-│   ├── build_concept_bank.py
-│   ├── run_object_context_suite.py
+│   ├── run_paper_suite.py
+│   ├── analyze_paper_results.py
 │   ├── run_refinement_suite.py
 │   ├── analyze_object_context.py
-│   ├── summarize_refinement.py
-│   ├── run_resolution_suite.py
-│   └── run_all_standard.py
-└── tests/test_smoke.py
+│   └── ...
+└── tests/
 ```
 
-The Python import package remains `rap_transclip` to avoid breaking the existing dataset and checkpoint utilities.
+## 5. Environment
 
-## 4. Environment
-
-Recommended:
+Recommended environment:
 
 - Linux;
 - Python 3.10 or 3.11;
-- CUDA GPU;
-- PyTorch matching the server CUDA driver;
+- a CUDA GPU;
+- PyTorch matching the CUDA driver;
 - `open-clip-torch`.
 
 ```bash
@@ -132,11 +128,9 @@ pip install -e .
 pytest -q
 ```
 
-The current smoke suite checks deterministic views, multi-view cue pooling, class-specific consensus, bounded adaptive fusion, saved routing artifacts, and normalized output probabilities.
+## 6. Dataset and checkpoint preparation
 
-## 5. Dataset structure
-
-Existing dataset folders can be reused:
+Dataset structure:
 
 ```text
 datasets/<DATASET>/
@@ -145,255 +139,238 @@ datasets/<DATASET>/
 └── images/
 ```
 
-Supported experiment names:
-
-```text
-AID
-EuroSAT
-MLRSNet
-OPTIMAL31
-PatternNet
-RESISC45
-RSC11
-RSICB128
-RSICB256
-WHURS19
-```
-
-Build the pilot indexes when needed:
+Build all indexes:
 
 ```bash
-for d in AID PatternNet RESISC45; do
-  python scripts/build_index.py \
-    --dataset "$d" \
-    --config configs/standard.yaml
+for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB256 WHURS19; do
+  python scripts/build_index.py --dataset "$d" --config configs/paper.yaml
 done
 ```
 
-## 6. Pretrained backbone
-
-The focused experiment uses GeoRSCLIP ViT-L/14:
-
-```bash
-python scripts/download_checkpoints.py \
-  --models GeoRSCLIP \
-  --architectures ViT-L-14
-```
-
-Expected checkpoint:
+Required primary checkpoint:
 
 ```text
 checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
 ```
 
-## 7. Concept bank
-
-The common concept file is:
+Cross-backbone experiments additionally require:
 
 ```text
-configs/concepts/common_remote_sensing.yaml
+checkpoints/RemoteCLIP/RemoteCLIP-ViT-L-14.pt
+checkpoints/SkyCLIP50/SkyCLIP_ViT_L14_top50pct_epoch_20.pt
 ```
 
-Example:
+CLIP ViT-L/14 is loaded through `open_clip` and may download its pretrained weights on first use.
 
-```yaml
-airport:
-  group: object
-  context:
-    - an airport complex with long paved runways, taxiways, aprons, and terminal areas
-  objects:
-    - runway
-    - airplane
-    - taxiway
-    - airport terminal
+## 7. Feature cache
+
+Clean multi-scale features are stored under:
+
+```text
+outputs/features_object_context/<dataset>/<model>/<architecture>/clean/
 ```
 
-`group` is used only for offline analysis. It is not fed into the model.
+Each image has one whole-image view and ten deterministic local crops:
 
-Preview resolved concepts:
+- scales: 0.50 and 0.75;
+- positions: center and four corners.
+
+The paper suite reuses cached features. Image features are re-extracted only when a dataset/backbone/resolution variant is missing or `--overwrite-features` is supplied.
+
+## 8. Complete paper experiment suite
+
+The complete suite is resumable. Existing result rows are skipped unless `--force-evaluate` is supplied.
+
+### Preflight only
 
 ```bash
-python scripts/build_concept_bank.py \
-  --config configs/standard.yaml \
-  --dataset AID
+python scripts/run_paper_suite.py \
+  --config configs/paper.yaml \
+  --stages preflight
 ```
 
-## 8. Multi-scale feature cache
-
-Default views:
-
-- crop scales: 0.50 and 0.75;
-- positions: center and four corners;
-- ten local crops plus one whole-image view.
-
-Features are stored under:
-
-```text
-outputs/features_object_context/<dataset>/<model>/<architecture>/<variant>/
-```
-
-The refined v2 inference uses the same cached image and text features as the first ObjectContext pilot. **Do not re-extract features unless the crop layout, backbone, semantic prompts, or concept bank has changed.**
-
-## 9. Re-run the refined three-dataset pilot
-
-The new result root is separate from the previous pilot:
-
-```text
-outputs/results/object_context_refined_v2/
-```
-
-Run all six main methods and the five refinement controls using the cached features:
+### One-command full run
 
 ```bash
 mkdir -p logs
 
-python scripts/run_refinement_suite.py \
-  --config configs/standard.yaml \
-  --datasets AID PatternNet RESISC45 \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  2>&1 | tee logs/object_context_refinement_v2.log
+python scripts/run_paper_suite.py \
+  --config configs/paper.yaml \
+  --stages all \
+  2>&1 | tee logs/object_context_paper_full.log
 ```
 
-The script runs:
+This runs:
+
+1. ten-dataset GeoRSCLIP ViT-L/14 main experiment with six methods;
+2. development-set local-view, cue-count, consensus, scale, and crop-count ablations;
+3. ten-dataset correct/shuffled/generic concept controls;
+4. 1×/2×/4×/8× resolution experiments on the three development datasets;
+5. CLIP, RemoteCLIP, GeoRSCLIP, and SkyCLIP50 ViT-L/14 validation on the development datasets.
+
+### Run stages separately
+
+```bash
+python scripts/run_paper_suite.py --config configs/paper.yaml --stages main
+python scripts/run_paper_suite.py --config configs/paper.yaml --stages ablation
+python scripts/run_paper_suite.py --config configs/paper.yaml --stages concepts
+python scripts/run_paper_suite.py --config configs/paper.yaml --stages resolution
+python scripts/run_paper_suite.py --config configs/paper.yaml --stages cross_backbone
+```
+
+Use cached features only:
+
+```bash
+python scripts/run_paper_suite.py \
+  --config configs/paper.yaml \
+  --stages main ablation concepts \
+  --skip-feature-extraction
+```
+
+Force re-evaluation without re-encoding images:
+
+```bash
+python scripts/run_paper_suite.py \
+  --config configs/paper.yaml \
+  --stages main \
+  --skip-feature-extraction \
+  --force-evaluate
+```
+
+## 9. Experiments included in the paper suite
+
+### 9.1 Main ten-dataset table
+
+Methods:
 
 ```text
-Main refined configuration:
-  global_classname
-  multicrop_classname
-  global_context
-  object_only
-  fixed_object_context
-  object_context
-
-ObjectContext variants:
-  view_topk1
-  view_topk3
-  no_class_consensus
-  shuffled_object_concepts
-  generic_object_concepts
+global_classname
+multicrop_classname
+global_context
+object_only
+fixed_object_context
+object_context
 ```
 
-No image encoding is performed by this script.
+Primary paper table uses Global-ClassName, MultiCrop-ClassName, Global-Context, and ObjectContext-CLIP. Object-Only and fixed fusion are placed in the ablation table.
 
-## 10. Analyze the refined pilot
+### 9.2 Ablation on development datasets
 
-Main comparison, semantic groups, class-level rescue/damage, and route diagnostics:
+The suite evaluates:
 
-```bash
-python scripts/analyze_object_context.py \
-  --config configs/standard.yaml \
-  --datasets AID PatternNet RESISC45 \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --experiment-tag object_context_refined_v2
-```
+- one, two, and three local views per cue;
+- one, two, and three local cues per class;
+- with and without class-specific consensus;
+- 0.50-scale crops only;
+- 0.75-scale crops only;
+- center crops only;
+- the full two-scale ten-crop configuration.
 
-Variant summary:
+Single-scale and center-crop ablations select subsets of the cached ten local views; they do not re-encode images.
 
-```bash
-python scripts/summarize_refinement.py
-```
-
-Generated files:
+### 9.3 Concept controls
 
 ```text
-outputs/results/object_context_refined_v2/raw_results.csv
-outputs/results/object_context_refined_v2/pilot_comparison_refined.csv
-outputs/results/object_context_refined_v2/pilot_decision_refined.csv
-outputs/results/object_context_refined_v2/refinement_comparison.csv
-outputs/results/object_context_refined_v2/semantic_group_analysis_refined.csv
-outputs/results/object_context_refined_v2/classwise_analysis_refined.csv
-outputs/results/object_context_refined_v2/predictions/
+correct
+shuffled
+generic
 ```
 
-Prediction bundles contain:
+Correct class-to-cue mapping must outperform shuffled and generic controls before the paper attributes gains to semantic factorization.
 
-- probabilities and final scores;
-- final class-specific object weights;
-- standardized context and object scores;
-- context reliability;
-- object margin reliability;
-- final object reliability;
-- sample-level object branch weight;
-- class-specific gate;
-- class-specific view consensus.
+### 9.4 Resolution robustness
 
-## 11. Decision criteria before ten datasets
+The three development datasets are evaluated at:
 
-Continue to the ten-dataset experiment only when the refined pilot satisfies most of the following:
+```text
+clean
+2× downsampling
+4× downsampling
+8× downsampling
+```
 
-1. `object_context` exceeds `global_classname` by at least 2.0 points on average;
-2. it exceeds `multicrop_classname` by at least 1.5 points;
-3. it exceeds `global_context` by at least 0.5 point;
-4. it exceeds `fixed_object_context` by at least 0.5 point;
-5. correct object concepts outperform shuffled and generic concepts;
-6. AID object-group degradation is substantially reduced;
-7. local rescue exceeds local damage on at least two datasets;
-8. `object_view_topk=2` or 3 is more stable than one-view hard pooling;
-9. class-specific consensus provides a measurable benefit.
+### 9.5 Cross-backbone validation
 
-A method that only beats whole-image zero-shot but not multi-crop or context-only controls does not provide sufficient evidence for the proposed mechanism.
+The focused cross-backbone experiment uses ViT-L/14 only:
 
-## 12. Ten-dataset experiment
+```text
+CLIP
+RemoteCLIP
+GeoRSCLIP
+SkyCLIP50
+```
 
-After freezing the concept bank and all inference parameters:
+The complete architecture matrix is not required unless the focused experiment is stable.
+
+## 10. Analyze all paper results
+
+After the suite finishes:
 
 ```bash
-python scripts/run_all_standard.py \
-  --config configs/standard.yaml \
-  --stage evaluate \
-  --models GeoRSCLIP \
-  --architectures ViT-L-14 \
-  --methods \
-    global_classname \
-    multicrop_classname \
-    global_context \
-    object_only \
-    fixed_object_context \
-    object_context \
-  2>&1 | tee logs/object_context_ten_datasets_v2.log
+python scripts/analyze_paper_results.py \
+  --config configs/paper.yaml
 ```
 
-If features for the remaining datasets do not yet exist, run `--stage all` instead of `--stage evaluate`.
+Outputs are written to:
 
-## 13. Resolution and cross-backbone experiments
-
-Resolution suite:
-
-```bash
-python scripts/run_resolution_suite.py \
-  --config configs/standard.yaml \
-  --datasets AID PatternNet RESISC45 \
-  --model GeoRSCLIP \
-  --architecture ViT-L-14 \
-  --factors 1 2 4 8
+```text
+outputs/results/object_context_paper_v1/analysis/
 ```
 
-Cross-backbone validation should start with ViT-L/14 only:
+Generated artifacts include:
 
-```bash
-python scripts/run_all_standard.py \
-  --config configs/full_matrix.yaml \
-  --stage all \
-  --datasets AID PatternNet RESISC45 \
-  --models CLIP RemoteCLIP GeoRSCLIP SkyCLIP50 \
-  --architectures ViT-L-14 \
-  --methods global_classname multicrop_classname global_context object_context
+```text
+table_main_top1.csv
+table_main_macro_f1.csv
+table_main_ece.csv
+table_development_validation.csv
+table_ablation.csv
+table_concept_controls.csv
+table_resolution.csv
+table_cross_backbone.csv
+table_efficiency.csv
+table_significance_per_dataset.csv
+table_significance_across_datasets.csv
+paper_results_summary.md
 ```
 
-Do not run the complete architecture matrix until the refined pilot and focused cross-backbone experiment are stable.
+The statistical report includes paired bootstrap confidence intervals, exact McNemar tests per dataset, and a Wilcoxon signed-rank test across datasets.
 
-## 14. Paper
+## 11. Frozen validation decision
 
-The active Chinese manuscript is:
+The generated `paper_results_summary.md` reports `PASS` only when the seven held-out validation datasets satisfy all of the following:
+
+1. average ObjectContext gain over Global-ClassName is at least +1.0 point;
+2. average gain over MultiCrop-ClassName is at least +0.5 point;
+3. average gain over Global-Context is positive;
+4. at least five of seven datasets are non-negative versus Global-ClassName;
+5. no validation dataset drops by more than 5.0 points versus Global-ClassName.
+
+A `REVIEW` result does not mean the code failed. It means the paper must use a conditional claim, revise the method, or stop before submission.
+
+## 12. Result interpretation
+
+The strongest acceptable result pattern is:
+
+- the seven validation datasets retain positive average gains;
+- correct concept mapping is consistently better than shuffled concepts;
+- adaptive fusion exceeds fixed fusion;
+- two- or three-view cue pooling is more stable than one-view hard pooling;
+- ObjectContext-CLIP remains competitive as resolution decreases;
+- the same qualitative trend appears on at least three VLM backbones.
+
+The paper must also report failure cases. Existing pilot failures include AID `viaduct`, PatternNet `christmas tree farm`, and RESISC45 `sparse residential`. These cases indicate semantic-description mismatch and must not be hidden by mean accuracy.
+
+## 13. Paper
+
+The active manuscript is:
 
 ```text
 paper/ObjectContext_CLIP_Chinese_Draft.md
 ```
 
-Do not insert estimated results. Fill tables only from generated CSV files.
+The manuscript includes completed pilot numbers and leaves full-suite values as placeholders until they are generated by `analyze_paper_results.py`.
 
-## 15. License
+## 14. License
 
 Repository code is MIT licensed. Dataset and pretrained-model licenses remain with their respective owners.
