@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features_object_context
-  results: outputs/results/object_context
+  results: outputs/results/object_context_refined_v2
   checkpoints: checkpoints
 
 datasets:
@@ -93,7 +93,23 @@ inference:
   class_name_weight: 0.50
   local_topk: 2
   multicrop_local_weight: 0.50
+
+  # Local-cue aggregation. Every cue must be supported by the strongest
+  # object_view_topk crops instead of a single hard maximum.
   object_topk: 2
+  object_view_topk: 2
+
+  # Class-specific multi-view support used by the adaptive route.
+  class_consensus_view_topk: 2
+  class_consensus_center: 0.0
+  class_consensus_temperature: 0.50
+  consensus_power: 1.0
+  class_consensus_power: 1.0
+
+  # Concept controls: correct | shuffled | generic.
+  object_concept_mode: correct
+  concept_shuffle_seed: 17
+
   fixed_object_weight: 0.50
   score_chunk_size: 128
 
@@ -105,7 +121,6 @@ inference:
   margin_temperature: 0.10
   reliability_temperature: 0.20
   context_bias: 0.15
-  consensus_power: 1.0
   class_gate_center: 0.0
   class_gate_temperature: 0.50
   max_object_weight: 0.85
@@ -113,4 +128,4 @@ inference:
 runtime:
   save_predictions: true
   overwrite: false
-  experiment_tag: object_context_main
+  experiment_tag: object_context_refined_v2

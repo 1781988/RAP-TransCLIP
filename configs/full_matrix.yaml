@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features_object_context
-  results: outputs/results/object_context_full_matrix
+  results: outputs/results/object_context_full_matrix_v2
   checkpoints: checkpoints
 
 datasets:
@@ -88,6 +88,14 @@ inference:
   local_topk: 2
   multicrop_local_weight: 0.50
   object_topk: 2
+  object_view_topk: 2
+  class_consensus_view_topk: 2
+  class_consensus_center: 0.0
+  class_consensus_temperature: 0.50
+  consensus_power: 1.0
+  class_consensus_power: 1.0
+  object_concept_mode: correct
+  concept_shuffle_seed: 17
   fixed_object_weight: 0.50
   score_chunk_size: 128
   global_temperature: 0.01
@@ -97,7 +105,6 @@ inference:
   margin_temperature: 0.10
   reliability_temperature: 0.20
   context_bias: 0.15
-  consensus_power: 1.0
   class_gate_center: 0.0
   class_gate_temperature: 0.50
   max_object_weight: 0.85
@@ -105,4 +112,4 @@ inference:
 runtime:
   save_predictions: false
   overwrite: false
-  experiment_tag: object_context_full_matrix
+  experiment_tag: object_context_full_matrix_v2

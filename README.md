@@ -2,41 +2,83 @@
 
 **Training-Free Multi-Scale Object–Context Collaborative Inference for Zero-Shot Remote-Sensing Scene Classification**
 
-This repository is the active codebase for a new direction that is independent of RS-TransCLIP transductive optimization. The repository name is retained for continuity, but the current scientific framework is **ObjectContext-CLIP**.
+This repository is the active implementation of **ObjectContext-CLIP**. The repository name is retained only for continuity with earlier experiments; the current method is independent of RS-TransCLIP transductive optimization.
 
-The method studies a concrete remote-sensing problem:
+ObjectContext-CLIP studies a remote-sensing classification problem that is not well represented by a single whole-image feature:
 
 - global image features preserve scene layout and surrounding context;
 - deterministic local crops preserve small objects and fine structures;
-- class text is factorized into context descriptions and local object/structure cues;
-- an evidence-adaptive fusion rule balances the two branches without target training.
+- class text is factorized into scene-context descriptions and local object/structure cues;
+- an evidence-adaptive fusion rule combines the two branches without target training.
 
-The image and text encoders remain frozen. Every image is classified independently; no transductive test collection is required.
+The image and text encoders remain frozen. Every image is classified independently.
 
-## 1. Main methods
+## 1. Controlled inference methods
 
-The evaluation framework provides six controlled methods:
+The evaluation framework provides six methods:
 
-1. `global_classname`: whole-image zero-shot classification with class-name prompts;
-2. `multicrop_classname`: global and local views matched to the same class-name prompts;
-3. `global_context`: whole-image classification with class names plus scene-context descriptions;
+1. `global_classname`: whole-image zero-shot classification using class-name prompts;
+2. `multicrop_classname`: whole-image and local views matched to the same class-name prompts;
+3. `global_context`: whole-image classification using class names and scene-context descriptions;
 4. `object_only`: local crops matched to class-specific object/structure cues;
 5. `fixed_object_context`: fixed fusion of context and object evidence;
-6. `object_context`: evidence-adaptive object–context collaboration.
+6. `object_context`: adaptive object–context collaboration.
 
-The critical comparison is not against RS-TransCLIP. It is:
+The critical comparison is:
 
 ```text
 ObjectContext-CLIP
-vs.
-global zero-shot
-vs.
-simple multi-crop zero-shot
-vs.
-context-only and object-only controls
+vs. global zero-shot
+vs. simple multi-crop zero-shot
+vs. context-only and object-only controls
+vs. fixed fusion
 ```
 
-## 2. Repository layout
+## 2. Refined v2 inference
+
+The first pilot showed meaningful average gains but also exposed two weaknesses: a single local crop could dominate one cue, and the previous view-consensus statistic was shared by all classes. The refined implementation makes three targeted changes.
+
+### 2.1 Multi-view cue pooling
+
+For each class-specific cue, the score is averaged over the strongest `object_view_topk` local crops instead of taking one hard maximum. The default is:
+
+```yaml
+inference:
+  object_view_topk: 2
+```
+
+This reduces accidental high responses from one crop.
+
+### 2.2 Class-specific view consensus
+
+Every candidate class receives its own multi-view support score. The adaptive route uses this score both for branch reliability and class-level gating:
+
+```yaml
+inference:
+  class_consensus_view_topk: 2
+  class_consensus_center: 0.0
+  class_consensus_temperature: 0.50
+  consensus_power: 1.0
+  class_consensus_power: 1.0
+```
+
+### 2.3 Concept-bank negative controls
+
+The runner supports three deterministic object-concept modes without re-encoding images:
+
+```yaml
+inference:
+  object_concept_mode: correct   # correct | shuffled | generic
+  concept_shuffle_seed: 17
+```
+
+- `correct`: use the released class-specific cue bank;
+- `shuffled`: circularly permute cue banks across classes;
+- `generic`: replace all class-specific cues with one global generic cue prototype.
+
+Correct concepts must outperform these controls before the paper claims that local semantic factorization is effective.
+
+## 3. Repository layout
 
 ```text
 RAP-TransCLIP/
@@ -61,17 +103,18 @@ RAP-TransCLIP/
 ├── scripts/
 │   ├── build_index.py
 │   ├── build_concept_bank.py
-│   ├── download_checkpoints.py
-│   ├── run_all_standard.py
 │   ├── run_object_context_suite.py
+│   ├── run_refinement_suite.py
+│   ├── analyze_object_context.py
+│   ├── summarize_refinement.py
 │   ├── run_resolution_suite.py
-│   └── summarize_results.py
-└── tests/
+│   └── run_all_standard.py
+└── tests/test_smoke.py
 ```
 
-The Python package name `rap_transclip` is temporarily retained to avoid breaking existing dataset/checkpoint utilities. It no longer denotes the active paper method.
+The Python import package remains `rap_transclip` to avoid breaking the existing dataset and checkpoint utilities.
 
-## 3. Environment
+## 4. Environment
 
 Recommended:
 
@@ -83,28 +126,17 @@ Recommended:
 
 ```bash
 cd /home/user/GMY/RAP-TransCLIP
-
 conda activate rap-transclip
 python -m pip install --upgrade pip setuptools wheel
-
-# Install the correct CUDA build of torch/torchvision first.
-pip install torch torchvision
-
 pip install -e .
-pip install faiss-cpu   # optional; not required by ObjectContext-CLIP
-
 pytest -q
 ```
 
-CLI:
+The current smoke suite checks deterministic views, multi-view cue pooling, class-specific consensus, bounded adaptive fusion, saved routing artifacts, and normalized output probabilities.
 
-```bash
-object-context-clip --help
-```
+## 5. Dataset structure
 
-## 4. Dataset structure
-
-Existing ten-dataset folders can be reused:
+Existing dataset folders can be reused:
 
 ```text
 datasets/<DATASET>/
@@ -113,7 +145,7 @@ datasets/<DATASET>/
 └── images/
 ```
 
-Supported first-party experiment names:
+Supported experiment names:
 
 ```text
 AID
@@ -128,7 +160,7 @@ RSICB256
 WHURS19
 ```
 
-Build indexes for the pilot datasets:
+Build the pilot indexes when needed:
 
 ```bash
 for d in AID PatternNet RESISC45; do
@@ -138,19 +170,9 @@ for d in AID PatternNet RESISC45; do
 done
 ```
 
-Build all indexes:
+## 6. Pretrained backbone
 
-```bash
-for d in AID EuroSAT MLRSNet OPTIMAL31 PatternNet RESISC45 RSC11 RSICB128 RSICB256 WHURS19; do
-  python scripts/build_index.py \
-    --dataset "$d" \
-    --config configs/standard.yaml
-done
-```
-
-## 5. Pretrained backbone
-
-The first experiment uses GeoRSCLIP ViT-L/14:
+The focused experiment uses GeoRSCLIP ViT-L/14:
 
 ```bash
 python scripts/download_checkpoints.py \
@@ -164,15 +186,15 @@ Expected checkpoint:
 checkpoints/GeoRSCLIP/RS5M_ViT-L-14.pt
 ```
 
-## 6. Concept bank
+## 7. Concept bank
 
-The released common knowledge file is:
+The common concept file is:
 
 ```text
 configs/concepts/common_remote_sensing.yaml
 ```
 
-Each class entry may contain:
+Example:
 
 ```yaml
 airport:
@@ -186,17 +208,9 @@ airport:
     - airport terminal
 ```
 
-`group` is only used for analysis; it is not fed into the adaptive fusion rule.
+`group` is used only for offline analysis. It is not fed into the model.
 
-Dataset-specific overrides are optional:
-
-```text
-configs/concepts/AID.yaml
-configs/concepts/PatternNet.yaml
-configs/concepts/RESISC45.yaml
-```
-
-Preview the resolved concept bank:
+Preview resolved concepts:
 
 ```bash
 python scripts/build_concept_bank.py \
@@ -204,119 +218,131 @@ python scripts/build_concept_bank.py \
   --dataset AID
 ```
 
-Output:
+## 8. Multi-scale feature cache
 
-```text
-outputs/results/object_context/concept_banks/AID.json
-```
-
-Classes not covered by the common file receive deterministic fallback descriptions. Before paper experiments, inspect all fallback entries and add reproducible dataset-specific corrections when needed.
-
-## 7. Multi-scale features
-
-Default local views:
+Default views:
 
 - crop scales: 0.50 and 0.75;
 - positions: center and four corners;
-- ten local crops per image;
-- one whole-image global view.
+- ten local crops plus one whole-image view.
 
-Features are stored under a separate root and do not overwrite previous RS/TextGraph features:
+Features are stored under:
 
 ```text
-outputs/features_object_context/
-└── <dataset>/<model>/<architecture>/<variant>/
-    ├── global_images.pt
-    ├── local_images.pt
-    ├── labels.pt
-    ├── class_texts.pt
-    ├── context_texts.pt
-    ├── object_texts.pt
-    ├── object_mask.pt
-    ├── concept_bank.json
-    └── metadata.json
+outputs/features_object_context/<dataset>/<model>/<architecture>/<variant>/
 ```
 
-Feature extraction is substantially more expensive than global CLIP inference because every image is encoded in multiple deterministic crops.
+The refined v2 inference uses the same cached image and text features as the first ObjectContext pilot. **Do not re-extract features unless the crop layout, backbone, semantic prompts, or concept bank has changed.**
 
-Extract one dataset:
+## 9. Re-run the refined three-dataset pilot
 
-```bash
-python scripts/run_all_standard.py \
-  --config configs/standard.yaml \
-  --stage features \
-  --datasets AID \
-  --models GeoRSCLIP \
-  --architectures ViT-L-14
+The new result root is separate from the previous pilot:
+
+```text
+outputs/results/object_context_refined_v2/
 ```
 
-For memory pressure, reduce:
+Run all six main methods and the five refinement controls using the cached features:
 
 ```bash
---override feature_extraction.batch_size=8
-```
+mkdir -p logs
 
-## 8. Pilot experiment
-
-Run AID, PatternNet, and RESISC45:
-
-```bash
-python scripts/run_object_context_suite.py \
+python scripts/run_refinement_suite.py \
   --config configs/standard.yaml \
   --datasets AID PatternNet RESISC45 \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --stage all \
-  2>&1 | tee logs/object_context_pilot.log
+  2>&1 | tee logs/object_context_refinement_v2.log
 ```
 
-If the features have already been extracted:
+The script runs:
+
+```text
+Main refined configuration:
+  global_classname
+  multicrop_classname
+  global_context
+  object_only
+  fixed_object_context
+  object_context
+
+ObjectContext variants:
+  view_topk1
+  view_topk3
+  no_class_consensus
+  shuffled_object_concepts
+  generic_object_concepts
+```
+
+No image encoding is performed by this script.
+
+## 10. Analyze the refined pilot
+
+Main comparison, semantic groups, class-level rescue/damage, and route diagnostics:
 
 ```bash
-python scripts/run_object_context_suite.py \
+python scripts/analyze_object_context.py \
   --config configs/standard.yaml \
   --datasets AID PatternNet RESISC45 \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --stage evaluate \
-  2>&1 | tee logs/object_context_pilot_eval.log
+  --experiment-tag object_context_refined_v2
 ```
 
-Results:
-
-```text
-outputs/results/object_context/raw_results.csv
-outputs/results/object_context/predictions/
-```
-
-Summarize:
+Variant summary:
 
 ```bash
-python scripts/summarize_results.py \
-  --input outputs/results/object_context/raw_results.csv \
-  --output outputs/results/object_context/summary.csv
+python scripts/summarize_refinement.py
 ```
 
-## 9. Pilot decision criteria
+Generated files:
 
-Do not immediately run all ten datasets. Continue only when the pilot shows:
+```text
+outputs/results/object_context_refined_v2/raw_results.csv
+outputs/results/object_context_refined_v2/pilot_comparison_refined.csv
+outputs/results/object_context_refined_v2/pilot_decision_refined.csv
+outputs/results/object_context_refined_v2/refinement_comparison.csv
+outputs/results/object_context_refined_v2/semantic_group_analysis_refined.csv
+outputs/results/object_context_refined_v2/classwise_analysis_refined.csv
+outputs/results/object_context_refined_v2/predictions/
+```
 
-1. `object_context` improves over `global_classname` by at least 1.0 point on average;
-2. `object_context` improves over `multicrop_classname` by at least 0.5 point on average;
-3. at least two of the three datasets improve;
-4. object-driven classes benefit more than context-driven classes;
-5. adaptive fusion differs meaningfully from fixed fusion.
+Prediction bundles contain:
 
-If the method beats global zero-shot but not simple multi-crop, the current semantic factorization is not yet sufficient.
+- probabilities and final scores;
+- final class-specific object weights;
+- standardized context and object scores;
+- context reliability;
+- object margin reliability;
+- final object reliability;
+- sample-level object branch weight;
+- class-specific gate;
+- class-specific view consensus.
 
-## 10. Full ten-dataset experiment
+## 11. Decision criteria before ten datasets
+
+Continue to the ten-dataset experiment only when the refined pilot satisfies most of the following:
+
+1. `object_context` exceeds `global_classname` by at least 2.0 points on average;
+2. it exceeds `multicrop_classname` by at least 1.5 points;
+3. it exceeds `global_context` by at least 0.5 point;
+4. it exceeds `fixed_object_context` by at least 0.5 point;
+5. correct object concepts outperform shuffled and generic concepts;
+6. AID object-group degradation is substantially reduced;
+7. local rescue exceeds local damage on at least two datasets;
+8. `object_view_topk=2` or 3 is more stable than one-view hard pooling;
+9. class-specific consensus provides a measurable benefit.
+
+A method that only beats whole-image zero-shot but not multi-crop or context-only controls does not provide sufficient evidence for the proposed mechanism.
+
+## 12. Ten-dataset experiment
 
 After freezing the concept bank and all inference parameters:
 
 ```bash
 python scripts/run_all_standard.py \
   --config configs/standard.yaml \
-  --stage all \
+  --stage evaluate \
   --models GeoRSCLIP \
   --architectures ViT-L-14 \
   --methods \
@@ -326,12 +352,14 @@ python scripts/run_all_standard.py \
     object_only \
     fixed_object_context \
     object_context \
-  2>&1 | tee logs/object_context_ten_datasets.log
+  2>&1 | tee logs/object_context_ten_datasets_v2.log
 ```
 
-## 11. Resolution robustness
+If features for the remaining datasets do not yet exist, run `--stage all` instead of `--stage evaluate`.
 
-The script creates separate feature variants for clean, 2x, 4x, and 8x downsampling:
+## 13. Resolution and cross-backbone experiments
+
+Resolution suite:
 
 ```bash
 python scripts/run_resolution_suite.py \
@@ -339,47 +367,22 @@ python scripts/run_resolution_suite.py \
   --datasets AID PatternNet RESISC45 \
   --model GeoRSCLIP \
   --architecture ViT-L-14 \
-  --factors 1 2 4 8 \
-  2>&1 | tee logs/object_context_resolution.log
+  --factors 1 2 4 8
 ```
 
-Output rows are distinguished by `feature_variant`.
-
-## 12. Cross-backbone validation
-
-Enable all ViT-L/14 backbones in `configs/full_matrix.yaml`, download their checkpoints, then run:
+Cross-backbone validation should start with ViT-L/14 only:
 
 ```bash
-python scripts/download_checkpoints.py \
-  --models RemoteCLIP GeoRSCLIP SkyCLIP50
-
 python scripts/run_all_standard.py \
   --config configs/full_matrix.yaml \
   --stage all \
   --datasets AID PatternNet RESISC45 \
   --models CLIP RemoteCLIP GeoRSCLIP SkyCLIP50 \
   --architectures ViT-L-14 \
-  --methods global_classname multicrop_classname object_context
+  --methods global_classname multicrop_classname global_context object_context
 ```
 
-Do not run the full matrix until the pilot succeeds.
-
-## 13. Important experimental controls
-
-The paper must include:
-
-- global class-name zero-shot;
-- simple multi-crop class-name baseline;
-- context-only branch;
-- object-only branch;
-- fixed fusion;
-- adaptive fusion;
-- shuffled object-concept negative control;
-- scale and crop-count ablation;
-- object/context/mixed class-group analysis;
-- runtime, memory, and feature-cache size.
-
-All methods must use the same frozen backbone and deterministic views.
+Do not run the complete architecture matrix until the refined pilot and focused cross-backbone experiment are stable.
 
 ## 14. Paper
 
@@ -389,7 +392,7 @@ The active Chinese manuscript is:
 paper/ObjectContext_CLIP_Chinese_Draft.md
 ```
 
-The manuscript contains no invented ObjectContext-CLIP numbers. Fill tables only from the generated CSV files.
+Do not insert estimated results. Fill tables only from generated CSV files.
 
 ## 15. License
 
