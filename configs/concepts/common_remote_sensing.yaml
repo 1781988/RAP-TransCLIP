@@ -1,0 +1,737 @@
+airplane:
+  context:
+  - an airport apron or runway area containing aircraft
+  group: object
+  objects:
+  - airplane
+  - aircraft fuselage
+  - aircraft wings
+  - runway markings
+  - airport apron
+airport:
+  context:
+  - an airport complex with long paved runways, taxiways, aprons, and terminal areas
+  group: object
+  objects:
+  - runway
+  - airplane
+  - taxiway
+  - airport terminal
+  - apron markings
+bare land:
+  context:
+  - an open area of exposed soil with little vegetation or construction
+  group: context
+  objects:
+  - exposed soil patches
+  - bare ground texture
+  - sparse vegetation
+bareland:
+  context:
+  - an open area of exposed soil with little vegetation or construction
+  group: context
+  objects:
+  - exposed soil patches
+  - bare ground texture
+  - sparse vegetation
+baseball diamond:
+  context:
+  - a recreational sports complex organized around a baseball diamond
+  group: object
+  objects:
+  - diamond-shaped infield
+  - baseball field
+  - outfield
+  - base paths
+  - bleachers
+baseball field:
+  context:
+  - a recreational sports complex organized around a baseball diamond
+  group: object
+  objects:
+  - diamond-shaped infield
+  - baseball field
+  - outfield
+  - base paths
+  - bleachers
+basketball court:
+  context:
+  - an outdoor or indoor sports area containing rectangular basketball courts
+  group: object
+  objects:
+  - basketball court
+  - painted court lines
+  - basketball hoops
+  - rectangular playing surface
+beach:
+  context:
+  - a sandy shoreline between water and land
+  group: mixed
+  objects:
+  - sand strip
+  - shoreline
+  - waves
+  - coastal water
+  - beach umbrellas
+bridge:
+  context:
+  - a transportation crossing spanning water, a valley, or another road
+  group: object
+  objects:
+  - bridge deck
+  - bridge piers
+  - road span
+  - river crossing
+  - approach roads
+cemetery:
+  context:
+  - an organized burial area with repeated rows and paths
+  group: object
+  objects:
+  - rows of graves
+  - headstones
+  - cemetery paths
+  - small memorial plots
+center:
+  context:
+  - a dense urban center with large buildings, roads, and public spaces
+  group: context
+  objects:
+  - large buildings
+  - road intersections
+  - commercial blocks
+  - public square
+chaparral:
+  context:
+  - dry shrubland with dense low vegetation and irregular natural texture
+  group: context
+  objects:
+  - shrub patches
+  - dry vegetation
+  - irregular bushes
+  - bare soil gaps
+church:
+  context:
+  - a religious building within an urban or rural settlement
+  group: object
+  objects:
+  - church building
+  - steeple
+  - cross-shaped roof
+  - courtyard
+  - parking area
+circular farmland:
+  context:
+  - agricultural land organized into circular center-pivot fields
+  group: context
+  objects:
+  - circular crop fields
+  - center pivot irrigation
+  - field boundaries
+  - farm tracks
+closed road:
+  context:
+  - a road segment blocked or terminated within the surrounding land
+  group: object
+  objects:
+  - road barrier
+  - dead-end road
+  - blocked lane
+  - road markings
+cloud:
+  context:
+  - bright cloud formations covering or obscuring the ground
+  group: context
+  objects:
+  - cloud masses
+  - cloud edges
+  - cloud shadows
+  - bright vapor texture
+coastal mansion:
+  context:
+  - large residential properties located along a coastline
+  group: mixed
+  objects:
+  - large houses
+  - swimming pools
+  - coastal road
+  - private yards
+  - shoreline
+commercial:
+  context:
+  - a commercial district with large buildings, parking areas, and dense roads
+  group: mixed
+  objects:
+  - shopping buildings
+  - parking lots
+  - commercial roofs
+  - delivery areas
+  - road network
+commercial area:
+  context:
+  - a commercial district with large buildings, parking areas, and dense roads
+  group: mixed
+  objects:
+  - shopping buildings
+  - parking lots
+  - commercial roofs
+  - delivery areas
+  - road network
+crosswalk:
+  context:
+  - an urban road intersection containing pedestrian crossing markings
+  group: object
+  objects:
+  - zebra crossing
+  - crosswalk stripes
+  - road lanes
+  - traffic intersection
+dense residential:
+  context:
+  - a densely built residential neighborhood with compact roofs and narrow streets
+  group: context
+  objects:
+  - closely spaced houses
+  - dense rooftops
+  - narrow roads
+  - small residential blocks
+desert:
+  context:
+  - an arid landscape dominated by sand or bare terrain and sparse vegetation
+  group: context
+  objects:
+  - sand texture
+  - dunes
+  - bare ground
+  - sparse shrubs
+farmland:
+  context:
+  - an agricultural landscape divided into cultivated fields
+  group: context
+  objects:
+  - crop fields
+  - field boundaries
+  - farm tracks
+  - irrigation patterns
+ferry terminal:
+  context:
+  - a waterfront transport terminal connecting roads, docks, and vessels
+  group: object
+  objects:
+  - ferry vessel
+  - terminal dock
+  - loading ramp
+  - parking lanes
+  - waterfront
+football field:
+  context:
+  - a sports complex centered on a marked football playing field
+  group: object
+  objects:
+  - football field
+  - yard lines
+  - goal posts
+  - running track
+  - bleachers
+forest:
+  context:
+  - a continuous area of dense tree canopy and natural vegetation
+  group: context
+  objects:
+  - tree crowns
+  - dense canopy
+  - forest clearings
+  - vegetation texture
+freeway:
+  context:
+  - a high-capacity divided roadway crossing the landscape
+  group: mixed
+  objects:
+  - multiple road lanes
+  - median strip
+  - highway ramps
+  - vehicles
+  - lane markings
+golf course:
+  context:
+  - a landscaped recreational area with fairways, greens, and water hazards
+  group: mixed
+  objects:
+  - fairways
+  - putting greens
+  - sand bunkers
+  - golf cart paths
+  - water hazards
+ground track field:
+  context:
+  - an athletics facility containing an oval running track and central field
+  group: object
+  objects:
+  - oval running track
+  - track lanes
+  - central sports field
+  - bleachers
+harbor:
+  context:
+  - a protected waterfront area with docks, ships, and port infrastructure
+  group: object
+  objects:
+  - ships
+  - docks
+  - piers
+  - water basin
+  - cargo facilities
+industrial:
+  context:
+  - an industrial district with large factories, storage areas, and service roads
+  group: mixed
+  objects:
+  - factory roofs
+  - warehouses
+  - storage tanks
+  - chimneys
+  - service yards
+industrial area:
+  context:
+  - an industrial district with large factories, storage areas, and service roads
+  group: mixed
+  objects:
+  - factory roofs
+  - warehouses
+  - storage tanks
+  - chimneys
+  - service yards
+intersection:
+  context:
+  - a road junction where multiple streets or highways meet
+  group: object
+  objects:
+  - crossing roads
+  - turning lanes
+  - traffic islands
+  - road markings
+  - vehicles
+island:
+  context:
+  - a land mass surrounded by water
+  group: context
+  objects:
+  - shoreline boundary
+  - island vegetation
+  - surrounding water
+  - coastal rocks
+lake:
+  context:
+  - an inland body of water surrounded by land
+  group: context
+  objects:
+  - open water
+  - shoreline
+  - small bays
+  - surrounding vegetation
+meadow:
+  context:
+  - an open grass-covered landscape with few trees or structures
+  group: context
+  objects:
+  - grass texture
+  - open field
+  - scattered shrubs
+  - field boundaries
+medium residential:
+  context:
+  - a moderately dense residential neighborhood with separated houses and roads
+  group: context
+  objects:
+  - detached houses
+  - moderate roof spacing
+  - residential streets
+  - yards
+mobile home park:
+  context:
+  - an organized residential area with repeated narrow mobile homes
+  group: mixed
+  objects:
+  - rows of mobile homes
+  - narrow roofs
+  - internal roads
+  - small lots
+mountain:
+  context:
+  - rugged elevated terrain with ridges, slopes, and natural cover
+  group: context
+  objects:
+  - mountain ridges
+  - steep slopes
+  - rock faces
+  - valleys
+  - vegetation bands
+nursing home:
+  context:
+  - a large residential care facility with surrounding paths and parking
+  group: mixed
+  objects:
+  - institutional building
+  - parking lot
+  - courtyard
+  - landscaped paths
+oil gas field:
+  context:
+  - an extraction field containing dispersed oil or gas infrastructure
+  group: object
+  objects:
+  - well pads
+  - service roads
+  - pipelines
+  - storage equipment
+  - cleared plots
+oil well:
+  context:
+  - an isolated extraction site centered on an oil well installation
+  group: object
+  objects:
+  - oil well
+  - pump jack
+  - well pad
+  - access road
+  - small storage tanks
+overpass:
+  context:
+  - a grade-separated road crossing with ramps and bridge structures
+  group: object
+  objects:
+  - road overpass
+  - bridge deck
+  - highway ramps
+  - merging lanes
+  - support piers
+palace:
+  context:
+  - a monumental building complex with formal courtyards and surrounding grounds
+  group: mixed
+  objects:
+  - large palace roof
+  - courtyard
+  - symmetrical buildings
+  - gardens
+  - walls
+park:
+  context:
+  - an urban or landscaped green area with paths and open spaces
+  group: context
+  objects:
+  - trees
+  - lawns
+  - walking paths
+  - small ponds
+  - recreational areas
+parking:
+  context:
+  - a paved area organized for vehicle parking
+  group: object
+  objects:
+  - parked cars
+  - parking spaces
+  - painted lines
+  - access lanes
+parking lot:
+  context:
+  - a paved area organized for vehicle parking
+  group: object
+  objects:
+  - parked cars
+  - parking spaces
+  - painted lines
+  - access lanes
+parking space:
+  context:
+  - a paved area containing repeated marked vehicle spaces
+  group: object
+  objects:
+  - parking stalls
+  - painted lines
+  - parked cars
+  - drive aisles
+playground:
+  context:
+  - a recreational area containing play or sports facilities
+  group: object
+  objects:
+  - play equipment
+  - sports court
+  - open play surface
+  - surrounding fence
+pond:
+  context:
+  - a small enclosed body of water within surrounding land
+  group: context
+  objects:
+  - small water body
+  - pond shoreline
+  - aquatic vegetation
+  - embankment
+port:
+  context:
+  - a protected waterfront area with docks, ships, and port infrastructure
+  group: object
+  objects:
+  - ships
+  - docks
+  - piers
+  - containers
+  - cargo cranes
+railway:
+  context:
+  - a transportation corridor formed by parallel railway tracks
+  group: object
+  objects:
+  - rail tracks
+  - railway sleepers
+  - parallel lines
+  - rail junctions
+  - trains
+railway station:
+  context:
+  - a rail transport facility with platforms, tracks, and station buildings
+  group: object
+  objects:
+  - rail platforms
+  - multiple tracks
+  - station building
+  - trains
+  - platform roofs
+rectangular farmland:
+  context:
+  - agricultural land divided into rectangular cultivated fields
+  group: context
+  objects:
+  - rectangular crop fields
+  - field boundaries
+  - farm roads
+  - irrigation channels
+resort:
+  context:
+  - a recreational accommodation complex with landscaped grounds and facilities
+  group: mixed
+  objects:
+  - hotel buildings
+  - swimming pools
+  - gardens
+  - paths
+  - recreational courts
+river:
+  context:
+  - a long narrow natural watercourse winding through the landscape
+  group: context
+  objects:
+  - river channel
+  - river banks
+  - meanders
+  - bridges
+  - riparian vegetation
+roundabout:
+  context:
+  - a circular road junction connecting several approaches
+  group: object
+  objects:
+  - central traffic island
+  - circular roadway
+  - approach roads
+  - lane markings
+runway:
+  context:
+  - a long straight paved aircraft runway within an airfield
+  group: object
+  objects:
+  - runway strip
+  - runway markings
+  - taxiways
+  - airfield grass
+  - airplanes
+runway marking:
+  context:
+  - an airport runway area dominated by painted landing and guidance markings
+  group: object
+  objects:
+  - runway numbers
+  - centerline markings
+  - threshold stripes
+  - paved runway
+school:
+  context:
+  - an educational campus with classroom buildings and outdoor facilities
+  group: mixed
+  objects:
+  - school buildings
+  - playground
+  - sports field
+  - courtyard
+  - parking area
+sea ice:
+  context:
+  - ocean or coastal water covered by fragmented ice
+  group: context
+  objects:
+  - ice floes
+  - open water gaps
+  - frozen surface
+  - ice edges
+ship:
+  context:
+  - a water area or port containing one or more vessels
+  group: object
+  objects:
+  - ship hull
+  - cargo ship
+  - wake
+  - dock
+  - water surface
+shipping yard:
+  context:
+  - a logistics yard organized for containers and cargo handling
+  group: object
+  objects:
+  - shipping containers
+  - container rows
+  - cargo cranes
+  - service roads
+  - warehouses
+snowberg:
+  context:
+  - snow-covered mountainous or iceberg terrain
+  group: context
+  objects:
+  - snow fields
+  - ice ridges
+  - rock outcrops
+  - glacial texture
+solar panel:
+  context:
+  - a solar energy site containing repeated arrays of photovoltaic panels
+  group: object
+  objects:
+  - solar panels
+  - panel rows
+  - inverter units
+  - service paths
+sparse residential:
+  context:
+  - a low-density residential area with widely separated houses and vegetation
+  group: context
+  objects:
+  - separated houses
+  - large yards
+  - sparse roads
+  - vegetation gaps
+square:
+  context:
+  - an open urban public square enclosed by buildings or roads
+  group: mixed
+  objects:
+  - open paved plaza
+  - surrounding buildings
+  - pedestrian paths
+  - monuments
+stadium:
+  context:
+  - a large sports venue with a central field and surrounding stands
+  group: object
+  objects:
+  - stadium field
+  - spectator stands
+  - oval structure
+  - running track
+  - parking areas
+storage tank:
+  context:
+  - an industrial storage facility containing repeated circular tanks
+  group: object
+  objects:
+  - circular storage tanks
+  - tank shadows
+  - service roads
+  - containment areas
+storage tanks:
+  context:
+  - an industrial storage facility containing repeated circular tanks
+  group: object
+  objects:
+  - circular storage tanks
+  - tank shadows
+  - service roads
+  - containment areas
+swimming pool:
+  context:
+  - a recreational or residential area containing a blue rectangular pool
+  group: object
+  objects:
+  - swimming pool
+  - pool deck
+  - lane markings
+  - surrounding buildings
+tennis court:
+  context:
+  - a sports area containing one or more rectangular tennis courts
+  group: object
+  objects:
+  - tennis court
+  - court lines
+  - central net
+  - fenced court
+  - adjacent courts
+terrace:
+  context:
+  - stepped agricultural or hillside terrain formed by terraces
+  group: context
+  objects:
+  - terraced slopes
+  - parallel contour steps
+  - field edges
+  - hillside paths
+thermal power station:
+  context:
+  - a large power generation complex with industrial buildings and cooling infrastructure
+  group: object
+  objects:
+  - cooling towers
+  - chimneys
+  - power plant buildings
+  - coal yard
+  - transmission lines
+transformer station:
+  context:
+  - an electrical substation containing transformers and grid equipment
+  group: object
+  objects:
+  - power transformers
+  - electrical busbars
+  - substation frames
+  - transmission lines
+viaduct:
+  context:
+  - a long elevated bridge carrying a road or railway across terrain
+  group: object
+  objects:
+  - elevated bridge deck
+  - repeated piers
+  - road span
+  - valley crossing
+wastewater treatment plant:
+  context:
+  - a water treatment facility containing repeated circular and rectangular basins
+  group: object
+  objects:
+  - clarifier tanks
+  - treatment basins
+  - pipes
+  - service buildings
+  - access roads
+wetland:
+  context:
+  - a water-saturated landscape with shallow water and dense vegetation
+  group: context
+  objects:
+  - marsh vegetation
+  - shallow water channels
+  - mud flats
+  - reeds
