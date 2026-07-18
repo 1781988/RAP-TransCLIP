@@ -6,15 +6,7 @@ from pathlib import Path
 from .config import apply_overrides, load_config
 from .data import build_index
 from .feature_extraction import extract_features
-from .runner import run_experiment
-
-
-METHODS = [
-    "zero_shot",
-    "rs_transclip",
-    "textgraph_transclip",
-    "text_graph_transclip",
-]
+from .runner import METHODS, run_experiment
 
 
 def _common_config(parser: argparse.ArgumentParser) -> None:
@@ -28,7 +20,7 @@ def _common_config(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="textgraph-transclip")
+    parser = argparse.ArgumentParser(prog="object-context-clip")
     sub = parser.add_subparsers(dest="command", required=True)
 
     index_parser = sub.add_parser("index", help="Build one dataset index")
@@ -37,7 +29,7 @@ def main() -> None:
 
     extract_parser = sub.add_parser(
         "extract",
-        help="Extract image and text features",
+        help="Extract global, local, and semantic text features",
     )
     _common_config(extract_parser)
     extract_parser.add_argument("--dataset", required=True)
@@ -45,18 +37,12 @@ def main() -> None:
     extract_parser.add_argument("--architecture", required=True)
     extract_parser.add_argument("--overwrite", action="store_true")
 
-    run_parser = sub.add_parser("run", help="Run one experiment")
+    run_parser = sub.add_parser("run", help="Run one inference method")
     _common_config(run_parser)
     run_parser.add_argument("--dataset", required=True)
     run_parser.add_argument("--model", required=True)
     run_parser.add_argument("--architecture", required=True)
     run_parser.add_argument("--method", choices=METHODS, required=True)
-    run_parser.add_argument("--protocol", default="full")
-    run_parser.add_argument(
-        "--protocol-arg",
-        action="append",
-        default=[],
-    )
 
     args = parser.parse_args()
     cfg = apply_overrides(load_config(args.config), args.override)
@@ -80,23 +66,12 @@ def main() -> None:
         )
         print(output)
     elif args.command == "run":
-        protocol_args = {}
-        for item in args.protocol_arg:
-            key, value = item.split("=", 1)
-            try:
-                import yaml
-
-                protocol_args[key] = yaml.safe_load(value)
-            except Exception:
-                protocol_args[key] = value
         run_experiment(
             cfg,
             args.dataset,
             args.model,
             args.architecture,
             args.method,
-            args.protocol,
-            protocol_args,
         )
 
 
