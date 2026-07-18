@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "textgraph-transclip"
-version = "0.2.0"
-description = "Text-guided boundary-preserving graph transduction for remote-sensing VLMs"
+name = "object-context-rsclip"
+version = "0.3.0"
+description = "Training-free multi-scale object-context inference for remote-sensing vision-language models"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [{name = "TextGraph-TransCLIP Contributors"}]
+authors = [{name = "ObjectContext-CLIP Contributors"}]
 dependencies = [
   "numpy>=1.26,<3",
   "pandas>=2.1",
@@ -24,8 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-textgraph-transclip = "rap_transclip.cli:main"
-rap-transclip = "rap_transclip.cli:main"
+object-context-clip = "rap_transclip.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["rap_transclip*"]

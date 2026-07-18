@@ -9,20 +9,25 @@ from typing import Any
 import torch
 
 from .config import config_hash
+from .feature_extraction import feature_directory, feature_variant
 from .metrics import expected_calibration_error, macro_f1, top1_accuracy
-from .protocols import create_protocol
-from .solver import (
-    solve_rs_transclip,
-    solve_textgraph_transclip,
-    zero_shot_assignments,
-)
-from .utils import l2_normalize
+from .object_context import run_object_context_inference
+
+
+METHODS = [
+    "global_classname",
+    "global_context",
+    "multicrop_classname",
+    "object_only",
+    "fixed_object_context",
+    "object_context",
+]
 
 
 def _load_tensor(path: Path, device: torch.device) -> torch.Tensor:
     if not path.exists():
         raise FileNotFoundError(path)
-    return torch.load(path, map_location="cpu").float().to(device)
+    return torch.load(path, map_location="cpu").to(device)
 
 
 def _append_csv(path: Path, row: dict[str, Any]) -> None:
@@ -39,119 +44,72 @@ def _safe_name(value: str) -> str:
     return value.replace("/", "-").replace("\\", "-").replace(" ", "_")
 
 
-def _save_solver_bundle(
-    cfg: dict,
-    dataset_name: str,
-    model_name: str,
-    architecture: str,
-    method: str,
-    protocol_name: str,
-    seed: int,
-    output,
-) -> None:
-    result_root = Path(cfg["paths"]["results"])
-    bundle_dir = result_root / "diagnostics"
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-    tag = str(cfg.get("runtime", {}).get("experiment_tag", "main"))
-    name = "__".join(
-        _safe_name(item)
-        for item in (
-            dataset_name,
-            model_name,
-            architecture,
-            method,
-            protocol_name,
-            f"seed{seed}",
-            tag,
-        )
-    )
-    torch.save(
-        {
-            "assignments": output.assignments.detach().cpu(),
-            "prototypes": output.prototypes.detach().cpu(),
-            "class_prior": output.class_prior.detach().cpu(),
-            "iterations": int(output.iterations),
-            "elapsed_seconds": float(output.elapsed_seconds),
-            "diagnostics": output.diagnostics,
-        },
-        bundle_dir / f"{name}.pt",
-    )
-
-
 def run_experiment(
     cfg: dict,
     dataset_name: str,
     model_name: str,
     architecture: str,
     method: str,
-    protocol_name: str = "full",
-    protocol_args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if method not in METHODS:
+        raise ValueError(f"Unsupported method: {method}")
+
     device_name = cfg["project"].get("device", "cuda")
     if device_name.startswith("cuda") and not torch.cuda.is_available():
         device_name = "cpu"
     device = torch.device(device_name)
 
-    feature_dir = (
-        Path(cfg["paths"]["features"])
-        / dataset_name
-        / model_name
-        / architecture
+    feature_dir = feature_directory(
+        cfg,
+        dataset_name,
+        model_name,
+        architecture,
     )
-    images = _load_tensor(feature_dir / "images.pt", device)
+    global_features = _load_tensor(
+        feature_dir / "global_images.pt",
+        device,
+    ).float()
+    local_features = _load_tensor(
+        feature_dir / "local_images.pt",
+        device,
+    ).float()
     labels = torch.load(
         feature_dir / "labels.pt",
         map_location="cpu",
-    ).long()
-    texts_uniform = _load_tensor(
-        feature_dir / "texts_uniform.pt",
+    ).long().to(device)
+    class_texts = _load_tensor(
+        feature_dir / "class_texts.pt",
         device,
-    )
-
-    seed = int(
-        cfg["protocol"].get(
-            "seed",
-            cfg["project"].get("seed", 1),
-        )
-    )
-    protocol = create_protocol(
-        protocol_name,
-        labels,
-        seed,
-        **(protocol_args or {}),
-    )
-    indices = protocol.indices.long()
-    images = images[indices.to(device)]
-    labels = labels[indices].to(device)
+    ).float()
+    context_texts = _load_tensor(
+        feature_dir / "context_texts.pt",
+        device,
+    ).float()
+    object_texts = _load_tensor(
+        feature_dir / "object_texts.pt",
+        device,
+    ).float()
+    object_mask = _load_tensor(
+        feature_dir / "object_mask.pt",
+        device,
+    ).bool()
 
     if torch.cuda.is_available() and device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
     started = time.perf_counter()
-    output = None
-    if method == "zero_shot":
-        probabilities = zero_shot_assignments(
-            l2_normalize(images),
-            l2_normalize(texts_uniform),
-            float(cfg["zero_shot"]["logit_scale"]),
-        )
-        solver_time = time.perf_counter() - started
-        iterations = 0
-        diagnostics: dict[str, object] = {}
-    elif method == "rs_transclip":
-        output = solve_rs_transclip(images, texts_uniform, cfg)
-        probabilities = output.assignments
-        solver_time = output.elapsed_seconds
-        iterations = output.iterations
-        diagnostics = output.diagnostics
-    elif method in {"textgraph_transclip", "text_graph_transclip"}:
-        output = solve_textgraph_transclip(images, texts_uniform, cfg)
-        probabilities = output.assignments
-        solver_time = output.elapsed_seconds
-        iterations = output.iterations
-        diagnostics = output.diagnostics
-    else:
-        raise ValueError(f"Unsupported method: {method}")
+    output = run_object_context_inference(
+        method,
+        global_features,
+        local_features,
+        class_texts,
+        context_texts,
+        object_texts,
+        object_mask,
+        cfg,
+    )
+    elapsed = time.perf_counter() - started
+    probabilities = output.probabilities
 
     peak_memory_mb = (
         torch.cuda.max_memory_allocated(device) / (1024**2)
@@ -160,46 +118,59 @@ def run_experiment(
     )
 
     runtime_cfg = cfg.get("runtime", {})
-    if output is not None and runtime_cfg.get("save_diagnostics", False):
-        _save_solver_bundle(
-            cfg,
-            dataset_name,
-            model_name,
-            architecture,
-            method,
-            protocol_name,
-            seed,
-            output,
-        )
-
     row = {
         "dataset": dataset_name,
         "model": model_name,
         "architecture": architecture,
+        "feature_variant": feature_variant(cfg),
         "method": method,
-        "protocol": protocol_name,
-        "experiment_tag": str(runtime_cfg.get("experiment_tag", "main")),
-        "seed": seed,
+        "experiment_tag": str(
+            runtime_cfg.get("experiment_tag", "object_context")
+        ),
         "num_samples": int(len(labels)),
-        "num_candidate_classes": int(texts_uniform.shape[0]),
+        "num_classes": int(class_texts.shape[0]),
+        "num_local_views": int(local_features.shape[1]),
         "top1": round(top1_accuracy(probabilities, labels), 4),
         "macro_f1": round(macro_f1(probabilities, labels), 4),
         "ece": round(expected_calibration_error(probabilities, labels), 4),
-        "solver_seconds": round(float(solver_time), 4),
+        "inference_seconds": round(float(elapsed), 4),
         "peak_cuda_memory_mb": round(float(peak_memory_mb), 2),
-        "iterations": int(iterations),
         "config_hash": config_hash(cfg),
-        "protocol_metadata": json.dumps(
-            protocol.metadata,
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
         "diagnostics": json.dumps(
-            diagnostics,
+            output.diagnostics,
             ensure_ascii=False,
             sort_keys=True,
         ),
     }
-    _append_csv(Path(cfg["paths"]["results"]) / "raw_results.csv", row)
+    result_root = Path(cfg["paths"]["results"])
+    _append_csv(result_root / "raw_results.csv", row)
+
+    if runtime_cfg.get("save_predictions", False):
+        prediction_dir = result_root / "predictions"
+        prediction_dir.mkdir(parents=True, exist_ok=True)
+        stem = "__".join(
+            [
+                _safe_name(dataset_name),
+                _safe_name(model_name),
+                _safe_name(architecture),
+                _safe_name(feature_variant(cfg)),
+                _safe_name(method),
+            ]
+        )
+        torch.save(
+            {
+                "probabilities": probabilities.detach().cpu(),
+                "scores": output.scores.detach().cpu(),
+                "object_weights": (
+                    None
+                    if output.object_weights is None
+                    else output.object_weights.detach().cpu()
+                ),
+                "labels": labels.detach().cpu(),
+                "diagnostics": output.diagnostics,
+            },
+            prediction_dir / f"{stem}.pt",
+        )
+
     print(json.dumps(row, indent=2, ensure_ascii=False))
     return row

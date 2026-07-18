@@ -5,7 +5,7 @@ import argparse
 
 from rap_transclip.config import apply_overrides, load_config
 from rap_transclip.feature_extraction import extract_features
-from rap_transclip.runner import run_experiment
+from rap_transclip.runner import METHODS, run_experiment
 
 
 def selected(values, defaults):
@@ -26,10 +26,14 @@ def main():
     parser.add_argument(
         "--methods",
         nargs="+",
+        choices=METHODS,
         default=[
-            "zero_shot",
-            "rs_transclip",
-            "textgraph_transclip",
+            "global_classname",
+            "multicrop_classname",
+            "global_context",
+            "object_only",
+            "fixed_object_context",
+            "object_context",
         ],
     )
     parser.add_argument("--override", action="append", default=[])
