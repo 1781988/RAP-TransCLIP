@@ -5,6 +5,7 @@ import torch
 from rap_transclip.multiview import build_view_specs
 from rap_transclip.object_context import (
     adaptive_object_context_fusion,
+    class_view_consensus,
     object_evidence_scores,
     run_object_context_inference,
 )
@@ -49,6 +50,33 @@ def synthetic_features(seed: int = 7):
     )
 
 
+def inference_config():
+    return {
+        "class_name_weight": 0.5,
+        "local_topk": 2,
+        "multicrop_local_weight": 0.5,
+        "object_topk": 2,
+        "object_view_topk": 2,
+        "class_consensus_view_topk": 2,
+        "class_consensus_center": 0.0,
+        "class_consensus_temperature": 0.5,
+        "fixed_object_weight": 0.5,
+        "score_chunk_size": 5,
+        "global_temperature": 0.01,
+        "fusion_temperature": 0.2,
+        "context_margin_center": 0.1,
+        "object_margin_center": 0.1,
+        "margin_temperature": 0.1,
+        "reliability_temperature": 0.2,
+        "context_bias": 0.15,
+        "consensus_power": 1.0,
+        "class_consensus_power": 1.0,
+        "class_gate_center": 0.0,
+        "class_gate_temperature": 0.5,
+        "max_object_weight": 0.85,
+    }
+
+
 def test_view_specs_are_deterministic():
     specs = build_view_specs(
         [0.5, 0.75],
@@ -76,6 +104,7 @@ def test_object_scores_have_expected_shape():
         object_texts,
         object_mask,
         object_topk=2,
+        object_view_topk=2,
         image_chunk_size=5,
     )
     assert scores.shape == (12, 3)
@@ -83,55 +112,76 @@ def test_object_scores_have_expected_shape():
     assert torch.isfinite(scores).all()
 
 
-def test_adaptive_fusion_is_bounded():
+def test_top_view_pooling_suppresses_single_view_outlier():
+    local_features = torch.tensor(
+        [[[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]]]
+    )
+    object_texts = torch.tensor([[[1.0, 0.0]]])
+    object_mask = torch.ones(1, 1, dtype=torch.bool)
+    top1, _ = object_evidence_scores(
+        local_features,
+        object_texts,
+        object_mask,
+        object_topk=1,
+        object_view_topk=1,
+    )
+    top2, _ = object_evidence_scores(
+        local_features,
+        object_texts,
+        object_mask,
+        object_topk=1,
+        object_view_topk=2,
+    )
+    assert top2.item() < top1.item()
+
+
+def test_class_consensus_is_class_specific_and_bounded():
+    view_scores = torch.tensor(
+        [
+            [
+                [3.0, 0.0, -1.0],
+                [2.5, 0.1, -0.5],
+                [-0.2, 2.0, 0.0],
+            ]
+        ]
+    )
+    consensus = class_view_consensus(
+        view_scores,
+        view_topk=2,
+        center=0.0,
+        temperature=0.5,
+    )
+    assert consensus.shape == (1, 3)
+    assert torch.all(consensus >= 0)
+    assert torch.all(consensus <= 1)
+    assert consensus[0, 0] > consensus[0, 2]
+
+
+def test_adaptive_fusion_is_bounded_and_returns_artifacts():
     context = torch.tensor([[2.0, 0.5, -1.0], [0.1, 0.2, 0.3]])
     objects = torch.tensor([[0.2, 2.5, -0.5], [0.1, 0.2, 0.3]])
-    consensus = torch.tensor([1.0, 0.25])
-    scores, weights, diagnostics = adaptive_object_context_fusion(
-        context,
-        objects,
-        consensus,
-        {
-            "context_margin_center": 0.1,
-            "object_margin_center": 0.1,
-            "margin_temperature": 0.1,
-            "reliability_temperature": 0.2,
-            "context_bias": 0.15,
-            "consensus_power": 1.0,
-            "class_gate_center": 0.0,
-            "class_gate_temperature": 0.5,
-            "max_object_weight": 0.85,
-        },
+    consensus = torch.tensor(
+        [[0.2, 0.9, 0.1], [0.4, 0.5, 0.6]]
+    )
+    scores, weights, diagnostics, artifacts = (
+        adaptive_object_context_fusion(
+            context,
+            objects,
+            consensus,
+            inference_config(),
+        )
     )
     assert scores.shape == context.shape
     assert torch.all(weights >= 0)
     assert torch.all(weights <= 0.85 + 1e-6)
     assert 0 <= diagnostics["mean_object_weight"] <= 0.85
+    assert artifacts["class_consensus"].shape == context.shape
+    assert artifacts["object_branch_weight"].shape == (2,)
 
 
 def test_all_inference_probabilities_are_normalized():
     features = synthetic_features()
-    cfg = {
-        "inference": {
-            "class_name_weight": 0.5,
-            "local_topk": 2,
-            "multicrop_local_weight": 0.5,
-            "object_topk": 2,
-            "fixed_object_weight": 0.5,
-            "score_chunk_size": 5,
-            "global_temperature": 0.01,
-            "fusion_temperature": 0.2,
-            "context_margin_center": 0.1,
-            "object_margin_center": 0.1,
-            "margin_temperature": 0.1,
-            "reliability_temperature": 0.2,
-            "context_bias": 0.15,
-            "consensus_power": 1.0,
-            "class_gate_center": 0.0,
-            "class_gate_temperature": 0.5,
-            "max_object_weight": 0.85,
-        }
-    }
+    cfg = {"inference": inference_config()}
     methods = [
         "global_classname",
         "global_context",
