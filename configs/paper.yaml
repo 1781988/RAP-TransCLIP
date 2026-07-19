@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features_object_context
-  results: outputs/results/object_context_uncertainty_v1
+  results: outputs/results/object_context_core_v1
   checkpoints: checkpoints
 
 paper_protocol:
@@ -18,6 +18,7 @@ paper_protocol:
   cross_backbone_models: [CLIP, RemoteCLIP, GeoRSCLIP, SkyCLIP50]
   cross_backbone_architecture: ViT-L-14
 
+# Ten remote-sensing scene-classification datasets.
 datasets:
   - AID
   - EuroSAT
@@ -92,8 +93,9 @@ semantic_prompts:
     - "a remote sensing crop containing {text}"
     - "a local image patch showing {text}"
 
-# Final method: the context branch is the base classifier. Local object evidence
-# provides positive residual corrections weighted by normalized context entropy.
+# Final lean method. The ineffective context-entropy gate, candidate mask, and
+# class-consensus fusion terms are removed. The global context score is the
+# anchor; multi-view, multi-cue local evidence provides a bounded residual.
 inference:
   class_name_weight: 0.50
   local_topk: 2
@@ -101,16 +103,12 @@ inference:
 
   object_topk: 2
   object_view_topk: 2
-  class_consensus_view_topk: 2
-  class_consensus_center: 0.0
-  class_consensus_temperature: 0.50
   object_concept_mode: correct
   concept_shuffle_seed: 17
 
-  use_uncertainty_gate: true
-  uncertainty_temperature: 1.0
   positive_residual_only: true
   residual_weight: 0.50
+  use_object_gate: true
   object_gate_center: 0.0
   object_gate_temperature: 0.50
   max_residual_boost: 1.0
@@ -123,7 +121,7 @@ inference:
 runtime:
   save_predictions: true
   overwrite: false
-  experiment_tag: uncertainty_main_georsclip
+  experiment_tag: core_main_georsclip
 
 analysis:
   bootstrap_repetitions: 2000
