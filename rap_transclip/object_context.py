@@ -24,48 +24,11 @@ def _standardize(scores: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return (scores - mean) / std
 
 
-def _standardize_per_view(
-    scores: torch.Tensor,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    mean = scores.mean(dim=2, keepdim=True)
-    std = scores.std(dim=2, keepdim=True, unbiased=False).clamp_min(eps)
-    return (scores - mean) / std
-
-
 def _softmax_probabilities(
     scores: torch.Tensor,
     temperature: float,
 ) -> torch.Tensor:
     return F.softmax(scores / max(float(temperature), 1e-6), dim=1)
-
-
-def normalized_context_uncertainty(
-    context_scores_z: torch.Tensor,
-    temperature: float = 1.0,
-) -> torch.Tensor:
-    """Return normalized predictive entropy in ``[0, 1]`` for each image."""
-    if context_scores_z.ndim != 2:
-        raise ValueError("context_scores_z must have shape [N, K]")
-    class_count = context_scores_z.shape[1]
-    if class_count <= 1:
-        return torch.zeros(
-            context_scores_z.shape[0],
-            device=context_scores_z.device,
-            dtype=context_scores_z.dtype,
-        )
-    probabilities = _softmax_probabilities(context_scores_z, temperature)
-    entropy = -(
-        probabilities * probabilities.clamp_min(1e-12).log()
-    ).sum(dim=1)
-    normalizer = torch.log(
-        torch.tensor(
-            float(class_count),
-            device=context_scores_z.device,
-            dtype=context_scores_z.dtype,
-        )
-    )
-    return (entropy / normalizer).clamp(0.0, 1.0)
 
 
 def context_scores(
@@ -109,14 +72,19 @@ def object_evidence_scores(
     object_topk: int,
     object_view_topk: int = 2,
     image_chunk_size: int = 256,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Aggregate class-specific local object/structure evidence."""
+) -> torch.Tensor:
+    """Aggregate class-specific local object and structure evidence.
+
+    Each local cue is pooled over the strongest ``object_view_topk`` views. The
+    strongest ``object_topk`` valid cues are then averaged for each class. This
+    keeps the two components that were supported by the completed experiments:
+    multi-view evidence aggregation and multiple class-specific local cues.
+    """
     local_features = l2_normalize(local_features)
     object_texts = l2_normalize(object_texts)
     object_mask = object_mask.bool()
 
     outputs: list[torch.Tensor] = []
-    view_outputs: list[torch.Tensor] = []
     class_count = object_texts.shape[0]
     valid_counts = object_mask.sum(dim=1)
     if (valid_counts == 0).any():
@@ -137,8 +105,6 @@ def object_evidence_scores(
         )
         expanded_mask = object_mask[None, None, :, :]
         masked = similarities.masked_fill(~expanded_mask, -1e4)
-
-        view_outputs.append(masked.max(dim=3).values)
         per_cue = masked.topk(k=cue_view_count, dim=1).values.mean(dim=1)
 
         class_scores = []
@@ -148,25 +114,7 @@ def object_evidence_scores(
             class_scores.append(values.mean(dim=1))
         outputs.append(torch.stack(class_scores, dim=1))
 
-    return torch.cat(outputs, dim=0), torch.cat(view_outputs, dim=0)
-
-
-def class_view_consensus(
-    view_class_scores: torch.Tensor,
-    view_topk: int,
-    center: float,
-    temperature: float,
-) -> torch.Tensor:
-    """Diagnostic class-specific support consistency across local views."""
-    if view_class_scores.ndim != 3:
-        raise ValueError("view_class_scores must have shape [N, V, K]")
-    standardized = _standardize_per_view(view_class_scores)
-    support = torch.sigmoid(
-        (standardized - float(center))
-        / max(float(temperature), 1e-6)
-    )
-    count = min(max(1, int(view_topk)), support.shape[1])
-    return support.topk(k=count, dim=1).values.mean(dim=1)
+    return torch.cat(outputs, dim=0)
 
 
 def fixed_fusion(
@@ -181,10 +129,9 @@ def fixed_fusion(
     return (1.0 - weight) * context_z + weight * object_z
 
 
-def uncertainty_gated_object_residual_fusion(
+def context_anchored_object_residual_fusion(
     context: torch.Tensor,
     objects: torch.Tensor,
-    class_consensus: torch.Tensor,
     cfg: dict,
 ) -> tuple[
     torch.Tensor,
@@ -192,64 +139,48 @@ def uncertainty_gated_object_residual_fusion(
     dict[str, float],
     dict[str, torch.Tensor],
 ]:
-    """Add local positive residuals in proportion to context uncertainty.
+    """Add class-specific local residuals to a global context anchor.
 
-    The global context branch remains the base classifier. Local object evidence
-    is used more strongly when the context prediction has high normalized entropy
-    and is suppressed when the context prediction is already decisive.
+    The final method intentionally excludes the previously ineffective context
+    entropy gate, Top-M candidate mask, and class-consensus weighting. The global
+    context branch remains the base classifier. By default, only positive local
+    advantages are added, while the object-score gate controls correction size.
     """
     context_z = _standardize(context)
     object_z = _standardize(objects)
-    if class_consensus.shape != object_z.shape:
-        raise ValueError("class_consensus must match score shape [N, K]")
 
-    if bool(cfg.get("use_uncertainty_gate", True)):
-        context_uncertainty = normalized_context_uncertainty(
-            context_z,
-            float(cfg.get("uncertainty_temperature", 1.0)),
+    if bool(cfg.get("use_object_gate", True)):
+        object_gate = torch.sigmoid(
+            (object_z - float(cfg.get("object_gate_center", 0.0)))
+            / max(float(cfg.get("object_gate_temperature", 0.5)), 1e-6)
         )
     else:
-        context_uncertainty = torch.ones(
-            context_z.shape[0],
-            device=context_z.device,
-            dtype=context_z.dtype,
-        )
-
-    class_gate = torch.sigmoid(
-        (object_z - float(cfg.get("object_gate_center", 0.0)))
-        / max(float(cfg.get("object_gate_temperature", 0.5)), 1e-6)
-    )
+        object_gate = torch.ones_like(object_z)
 
     residual = object_z - context_z
     if bool(cfg.get("positive_residual_only", True)):
         residual = residual.clamp_min(0.0)
 
     residual_weight = max(float(cfg.get("residual_weight", 0.5)), 0.0)
-    effective_weight = (
-        residual_weight
-        * context_uncertainty[:, None]
-        * class_gate
-    )
+    effective_weight = residual_weight * object_gate
     correction = effective_weight * residual
+
     max_boost = float(cfg.get("max_residual_boost", 1.0))
     if max_boost > 0:
-        correction = correction.clamp(max=max_boost)
+        correction = correction.clamp(min=-max_boost, max=max_boost)
 
     scores = context_z + correction
     diagnostics = {
-        "mean_context_uncertainty": float(context_uncertainty.mean().item()),
-        "mean_class_gate": float(class_gate.mean().item()),
-        "mean_class_consensus": float(class_consensus.mean().item()),
+        "mean_object_gate": float(object_gate.mean().item()),
         "mean_object_weight": float(effective_weight.mean().item()),
-        "mean_positive_correction": float(correction.mean().item()),
-        "max_positive_correction": float(correction.max().item()),
+        "mean_object_correction": float(correction.mean().item()),
+        "mean_absolute_object_correction": float(correction.abs().mean().item()),
+        "max_absolute_object_correction": float(correction.abs().max().item()),
     }
     artifacts = {
         "context_scores": context_z,
         "object_scores": object_z,
-        "context_uncertainty": context_uncertainty,
-        "class_gate": class_gate,
-        "class_consensus": class_consensus,
+        "object_gate": object_gate,
         "object_residual": residual,
         "object_correction": correction,
     }
@@ -315,7 +246,7 @@ def run_object_context_inference(
             diagnostics={"branch": "multicrop_classname"},
         )
 
-    objects, per_view = object_evidence_scores(
+    objects = object_evidence_scores(
         local_features,
         object_texts,
         object_mask,
@@ -323,16 +254,7 @@ def run_object_context_inference(
         int(inference_cfg.get("object_view_topk", 2)),
         int(inference_cfg.get("score_chunk_size", 256)),
     )
-    class_consensus = class_view_consensus(
-        per_view,
-        int(inference_cfg.get("class_consensus_view_topk", 2)),
-        float(inference_cfg.get("class_consensus_center", 0.0)),
-        float(inference_cfg.get("class_consensus_temperature", 0.5)),
-    )
-    common_artifacts = {
-        "object_scores": _standardize(objects),
-        "class_consensus": class_consensus,
-    }
+    common_artifacts = {"object_scores": _standardize(objects)}
 
     if method == "object_only":
         scores = _standardize(objects)
@@ -343,10 +265,7 @@ def run_object_context_inference(
             ),
             scores=scores,
             object_weights=torch.ones_like(scores),
-            diagnostics={
-                "branch": "object_only",
-                "mean_class_consensus": float(class_consensus.mean().item()),
-            },
+            diagnostics={"branch": "object_only"},
             artifacts=common_artifacts,
         )
 
@@ -362,7 +281,6 @@ def run_object_context_inference(
             object_weights=torch.full_like(scores, weight),
             diagnostics={
                 "branch": "fixed_object_context",
-                "mean_class_consensus": float(class_consensus.mean().item()),
                 "mean_object_weight": weight,
             },
             artifacts=common_artifacts,
@@ -370,10 +288,9 @@ def run_object_context_inference(
 
     if method == "object_context":
         scores, weights, diagnostics, artifacts = (
-            uncertainty_gated_object_residual_fusion(
+            context_anchored_object_residual_fusion(
                 context,
                 objects,
-                class_consensus,
                 inference_cfg,
             )
         )
