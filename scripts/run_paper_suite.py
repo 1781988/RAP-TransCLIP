@@ -12,7 +12,7 @@ from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import extract_features, feature_variant
 from rap_transclip.runner import run_experiment
 
-MAIN_TAG = "uncertainty_main_georsclip"
+MAIN_TAG = "core_main_georsclip"
 MAIN_METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -28,18 +28,18 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 
-# Mechanism ablations of the final method. Global-Context already serves as the
-# no-local-residual control in the main table.
+# Focused component tests for the final lean method. The already rejected
+# uncertainty gate, candidate mask, and class-consensus fusion are not rerun.
 ABLATIONS = [
-    ("uncertainty_ablation_no_gate", {"use_uncertainty_gate": False}),
-    ("uncertainty_ablation_signed_residual", {"positive_residual_only": False}),
-    ("uncertainty_ablation_single_view", {"object_view_topk": 1}),
-    ("uncertainty_ablation_single_cue", {"object_topk": 1}),
+    ("core_ablation_no_object_gate", {"use_object_gate": False}),
+    ("core_ablation_signed_residual", {"positive_residual_only": False}),
+    ("core_ablation_single_view", {"object_view_topk": 1}),
+    ("core_ablation_single_cue", {"object_topk": 1}),
 ]
 
 CONCEPT_CONTROLS = [
-    ("uncertainty_concept_shuffled", "shuffled"),
-    ("uncertainty_concept_generic", "generic"),
+    ("core_concept_shuffled", "shuffled"),
+    ("core_concept_generic", "generic"),
 ]
 
 
@@ -211,7 +211,7 @@ def run_concepts(args, base: dict) -> None:
 def run_resolution(args, base: dict) -> None:
     protocol = base["paper_protocol"]
     for factor in args.resolution_factors:
-        cfg = _copy_with(base, tag=f"uncertainty_resolution_x{factor}")
+        cfg = _copy_with(base, tag=f"core_resolution_x{factor}")
         cfg["feature_extraction"]["downsample_factor"] = int(factor)
         cfg["feature_extraction"]["variant"] = (
             "clean" if factor == 1 else f"downsample_x{factor}"
@@ -234,7 +234,7 @@ def run_cross_backbone(args, base: dict) -> None:
     for model in protocol["cross_backbone_models"]:
         cfg = _copy_with(
             base,
-            tag=f"uncertainty_cross_backbone_{model.lower()}",
+            tag=f"core_cross_backbone_{model.lower()}",
             model=model,
         )
         _run_grid(
@@ -251,7 +251,7 @@ def run_cross_backbone(args, base: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the complete ObjectContext-CLIP paper experiment suite."
+        description="Run the complete lean ObjectContext-CLIP paper suite."
     )
     parser.add_argument("--config", default="configs/paper.yaml")
     parser.add_argument(
