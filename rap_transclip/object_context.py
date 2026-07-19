@@ -33,28 +33,6 @@ def _standardize_per_view(
     return (scores - mean) / std
 
 
-def _top_margin(scores: torch.Tensor) -> torch.Tensor:
-    if scores.shape[1] == 1:
-        return torch.ones(
-            scores.shape[0],
-            device=scores.device,
-            dtype=scores.dtype,
-        )
-    values = scores.topk(k=2, dim=1).values
-    return values[:, 0] - values[:, 1]
-
-
-def _margin_reliability(
-    scores: torch.Tensor,
-    center: float,
-    temperature: float,
-) -> torch.Tensor:
-    margin = _top_margin(scores)
-    return torch.sigmoid(
-        (margin - float(center)) / max(float(temperature), 1e-6)
-    )
-
-
 def _softmax_probabilities(
     scores: torch.Tensor,
     temperature: float,
@@ -104,11 +82,11 @@ def object_evidence_scores(
     object_view_topk: int = 2,
     image_chunk_size: int = 256,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Aggregate class-specific local-cue evidence.
+    """Aggregate class-specific local object/structure evidence.
 
-    Each cue is required to receive support from the strongest ``object_view_topk``
-    local views instead of a single hard maximum. This reduces accidental
-    responses caused by one crop while preserving sparse object evidence.
+    Every local cue must be supported by several high-response views rather than
+    one hard maximum. The returned tensors are class-level object scores and
+    per-view class scores used by the consensus term.
     """
     local_features = l2_normalize(local_features)
     object_texts = l2_normalize(object_texts)
@@ -116,13 +94,16 @@ def object_evidence_scores(
 
     outputs: list[torch.Tensor] = []
     view_outputs: list[torch.Tensor] = []
-    class_count, _, _ = object_texts.shape
+    class_count = object_texts.shape[0]
     valid_counts = object_mask.sum(dim=1)
     if (valid_counts == 0).any():
         raise ValueError("Every class must contain at least one local cue")
 
-    view_count = local_features.shape[1]
-    cue_view_count = min(max(1, int(object_view_topk)), view_count)
+    cue_view_count = min(
+        max(1, int(object_view_topk)),
+        local_features.shape[1],
+    )
+    max_requested = max(1, int(object_topk))
 
     for start in range(0, local_features.shape[0], image_chunk_size):
         end = min(start + image_chunk_size, local_features.shape[0])
@@ -134,12 +115,10 @@ def object_evidence_scores(
         expanded_mask = object_mask[None, None, :, :]
         masked = similarities.masked_fill(~expanded_mask, -1e4)
 
-        view_class = masked.max(dim=3).values
-        view_outputs.append(view_class)
-
+        view_outputs.append(masked.max(dim=3).values)
         per_cue = masked.topk(k=cue_view_count, dim=1).values.mean(dim=1)
+
         class_scores = []
-        max_requested = max(1, int(object_topk))
         for class_id in range(class_count):
             count = min(max_requested, int(valid_counts[class_id].item()))
             values = per_cue[:, class_id, :].topk(k=count, dim=1).values
@@ -155,12 +134,7 @@ def class_view_consensus(
     center: float,
     temperature: float,
 ) -> torch.Tensor:
-    """Estimate class-specific support consistency across local views.
-
-    Scores are standardized across candidate classes inside each local view,
-    converted to soft support values, then averaged over the strongest views
-    for every class. The result has shape ``[N, K]`` and lies in ``[0, 1]``.
-    """
+    """Estimate class-specific support consistency across local views."""
     if view_class_scores.ndim != 3:
         raise ValueError("view_class_scores must have shape [N, V, K]")
     standardized = _standardize_per_view(view_class_scores)
@@ -177,13 +151,29 @@ def fixed_fusion(
     objects: torch.Tensor,
     object_weight: float,
 ) -> torch.Tensor:
+    """Conventional replacement-style fixed fusion used only as a control."""
     context_z = _standardize(context)
     object_z = _standardize(objects)
     weight = float(min(max(object_weight, 0.0), 1.0))
     return (1.0 - weight) * context_z + weight * object_z
 
 
-def adaptive_object_context_fusion(
+def _context_candidate_mask(
+    context_scores_z: torch.Tensor,
+    candidate_topk: int,
+) -> torch.Tensor:
+    """Return a binary mask for classes already supported by global context."""
+    class_count = context_scores_z.shape[1]
+    count = int(candidate_topk)
+    if count <= 0 or count >= class_count:
+        return torch.ones_like(context_scores_z)
+    indices = context_scores_z.topk(k=count, dim=1).indices
+    mask = torch.zeros_like(context_scores_z)
+    mask.scatter_(1, indices, 1.0)
+    return mask
+
+
+def context_anchored_object_fusion(
     context: torch.Tensor,
     objects: torch.Tensor,
     class_consensus: torch.Tensor,
@@ -194,90 +184,65 @@ def adaptive_object_context_fusion(
     dict[str, float],
     dict[str, torch.Tensor],
 ]:
+    """Add selective local evidence on top of an unchanged context anchor.
+
+    This is the single core inference rule of ObjectContext-CLIP. The context
+    branch remains the base classifier. Local evidence can only correct classes
+    inside the context Top-M candidate set. By default only positive object
+    advantage is added, so local crops cannot directly suppress a context score.
+    """
     context_z = _standardize(context)
     object_z = _standardize(objects)
     if class_consensus.shape != object_z.shape:
         raise ValueError("class_consensus must match score shape [N, K]")
 
-    context_rel = _margin_reliability(
+    candidate_mask = _context_candidate_mask(
         context_z,
-        center=float(cfg.get("context_margin_center", 0.10)),
-        temperature=float(cfg.get("margin_temperature", 0.10)),
+        int(cfg.get("context_candidate_topk", 5)),
     )
-    object_margin_rel = _margin_reliability(
-        object_z,
-        center=float(cfg.get("object_margin_center", 0.10)),
-        temperature=float(cfg.get("margin_temperature", 0.10)),
-    )
-
-    object_prediction = object_z.argmax(dim=1)
-    predicted_consensus = class_consensus.gather(
-        1,
-        object_prediction[:, None],
-    ).squeeze(1)
-    consensus_power = max(float(cfg.get("consensus_power", 1.0)), 0.0)
-    object_rel = object_margin_rel * predicted_consensus.clamp_min(
-        1e-4
-    ).pow(consensus_power)
-
-    context_bias = float(cfg.get("context_bias", 0.15))
-    reliability_temperature = max(
-        float(cfg.get("reliability_temperature", 0.20)),
-        1e-6,
-    )
-    branch_logits = torch.stack(
-        [
-            (context_rel + 1e-6).log() + context_bias,
-            (object_rel + 1e-6).log(),
-        ],
-        dim=1,
-    ) / reliability_temperature
-    object_branch_weight = branch_logits.softmax(dim=1)[:, 1]
-
     class_gate = torch.sigmoid(
-        (object_z - float(cfg.get("class_gate_center", 0.0)))
-        / max(float(cfg.get("class_gate_temperature", 0.5)), 1e-6)
+        (object_z - float(cfg.get("object_gate_center", 0.0)))
+        / max(float(cfg.get("object_gate_temperature", 0.5)), 1e-6)
     )
-    class_consensus_power = max(
+    consensus_power = max(
         float(cfg.get("class_consensus_power", 1.0)),
         0.0,
     )
-    class_support = class_consensus.clamp_min(1e-4).pow(
-        class_consensus_power
+    support = class_gate * class_consensus.clamp_min(1e-4).pow(
+        consensus_power
     )
-    weights = object_branch_weight[:, None] * class_gate * class_support
-    max_weight = float(cfg.get("max_object_weight", 0.85))
-    weights = weights.clamp(0.0, max_weight)
 
-    scores = (1.0 - weights) * context_z + weights * object_z
+    residual = object_z - context_z
+    if bool(cfg.get("positive_residual_only", True)):
+        residual = residual.clamp_min(0.0)
+
+    residual_weight = max(float(cfg.get("residual_weight", 0.5)), 0.0)
+    correction = residual_weight * candidate_mask * support * residual
+    max_boost = float(cfg.get("max_residual_boost", 1.0))
+    if max_boost > 0:
+        correction = correction.clamp(max=max_boost)
+
+    scores = context_z + correction
+    effective_weight = residual_weight * candidate_mask * support
     diagnostics = {
-        "mean_context_reliability": float(context_rel.mean().item()),
-        "mean_object_margin_reliability": float(
-            object_margin_rel.mean().item()
-        ),
-        "mean_object_reliability": float(object_rel.mean().item()),
-        "mean_predicted_class_consensus": float(
-            predicted_consensus.mean().item()
-        ),
+        "mean_candidate_fraction": float(candidate_mask.mean().item()),
         "mean_class_consensus": float(class_consensus.mean().item()),
-        "mean_object_branch_weight": float(
-            object_branch_weight.mean().item()
-        ),
         "mean_class_gate": float(class_gate.mean().item()),
-        "mean_object_weight": float(weights.mean().item()),
-        "max_object_weight": float(weights.max().item()),
+        "mean_object_support": float(support.mean().item()),
+        "mean_object_weight": float(effective_weight.mean().item()),
+        "mean_positive_correction": float(correction.mean().item()),
+        "max_positive_correction": float(correction.max().item()),
     }
     artifacts = {
         "context_scores": context_z,
         "object_scores": object_z,
-        "context_reliability": context_rel,
-        "object_margin_reliability": object_margin_rel,
-        "object_reliability": object_rel,
-        "object_branch_weight": object_branch_weight,
+        "candidate_mask": candidate_mask,
         "class_gate": class_gate,
         "class_consensus": class_consensus,
+        "object_residual": residual,
+        "object_correction": correction,
     }
-    return scores, weights, diagnostics, artifacts
+    return scores, effective_weight, diagnostics, artifacts
 
 
 def run_object_context_inference(
@@ -353,7 +318,6 @@ def run_object_context_inference(
         float(inference_cfg.get("class_consensus_center", 0.0)),
         float(inference_cfg.get("class_consensus_temperature", 0.5)),
     )
-
     common_artifacts = {
         "object_scores": _standardize(objects),
         "class_consensus": class_consensus,
@@ -364,15 +328,13 @@ def run_object_context_inference(
         return InferenceOutput(
             probabilities=_softmax_probabilities(
                 scores,
-                float(inference_cfg.get("fusion_temperature", 0.2)),
+                float(inference_cfg.get("fusion_temperature", 1.0)),
             ),
             scores=scores,
             object_weights=torch.ones_like(scores),
             diagnostics={
                 "branch": "object_only",
-                "mean_class_consensus": float(
-                    class_consensus.mean().item()
-                ),
+                "mean_class_consensus": float(class_consensus.mean().item()),
             },
             artifacts=common_artifacts,
         )
@@ -383,15 +345,13 @@ def run_object_context_inference(
         return InferenceOutput(
             probabilities=_softmax_probabilities(
                 scores,
-                float(inference_cfg.get("fusion_temperature", 0.2)),
+                float(inference_cfg.get("fusion_temperature", 1.0)),
             ),
             scores=scores,
             object_weights=torch.full_like(scores, weight),
             diagnostics={
                 "branch": "fixed_object_context",
-                "mean_class_consensus": float(
-                    class_consensus.mean().item()
-                ),
+                "mean_class_consensus": float(class_consensus.mean().item()),
                 "mean_object_weight": weight,
             },
             artifacts=common_artifacts,
@@ -399,7 +359,7 @@ def run_object_context_inference(
 
     if method == "object_context":
         scores, weights, diagnostics, artifacts = (
-            adaptive_object_context_fusion(
+            context_anchored_object_fusion(
                 context,
                 objects,
                 class_consensus,
@@ -410,7 +370,7 @@ def run_object_context_inference(
         return InferenceOutput(
             probabilities=_softmax_probabilities(
                 scores,
-                float(inference_cfg.get("fusion_temperature", 0.2)),
+                float(inference_cfg.get("fusion_temperature", 1.0)),
             ),
             scores=scores,
             object_weights=weights,
