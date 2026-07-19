@@ -14,7 +14,7 @@ from scipy.stats import binomtest, wilcoxon
 from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import feature_directory
 
-MAIN_TAG = "anchor_main_georsclip"
+MAIN_TAG = "uncertainty_main_georsclip"
 PRIMARY_METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -29,11 +29,10 @@ BASELINES = [
 ]
 ABLATION_TAGS = [
     MAIN_TAG,
-    "anchor_ablation_no_candidate",
-    "anchor_ablation_candidate_top3",
-    "anchor_ablation_candidate_top10",
-    "anchor_ablation_signed_residual",
-    "anchor_ablation_no_consensus",
+    "uncertainty_ablation_no_gate",
+    "uncertainty_ablation_signed_residual",
+    "uncertainty_ablation_single_view",
+    "uncertainty_ablation_single_cue",
 ]
 
 
@@ -142,7 +141,9 @@ def save_main_tables(
     protocol: dict,
 ) -> dict[str, pd.DataFrame]:
     tables = {}
-    for metric in ["top1", "macro_f1", "ece"]:
+    # ECE is intentionally excluded: the controlled methods use different logit
+    # constructions, so uncalibrated probability scales are not comparable.
+    for metric in ["top1", "macro_f1"]:
         table = pivot_metric(
             frame,
             MAIN_TAG,
@@ -159,7 +160,7 @@ def save_main_tables(
 def save_significance(
     cfg: dict,
     output: Path,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     protocol = cfg["paper_protocol"]
     root = Path(cfg["paths"]["results"])
     model = protocol["primary_model"]
@@ -226,7 +227,8 @@ def save_significance(
                 "mcnemar_exact_p": p_value,
             })
 
-    pd.DataFrame(rows).to_csv(
+    per_dataset = pd.DataFrame(rows)
+    per_dataset.to_csv(
         output / "table_significance_per_dataset.csv",
         index=False,
     )
@@ -253,7 +255,7 @@ def save_significance(
         output / "table_significance_across_datasets.csv",
         index=False,
     )
-    return aggregate
+    return per_dataset, aggregate
 
 
 def save_auxiliary_tables(
@@ -283,8 +285,8 @@ def save_auxiliary_tables(
 
     concept_tags = {
         MAIN_TAG: "correct",
-        "anchor_concept_shuffled": "shuffled",
-        "anchor_concept_generic": "no_class_specific_object_evidence",
+        "uncertainty_concept_shuffled": "shuffled",
+        "uncertainty_concept_generic": "no_class_specific_object_evidence",
     }
     concept = frame[
         (frame["model"] == model)
@@ -307,11 +309,13 @@ def save_auxiliary_tables(
         (frame["model"] == model)
         & (frame["architecture"] == architecture)
         & frame["dataset"].isin(development)
-        & frame["experiment_tag"].str.startswith("anchor_resolution_x", na=False)
+        & frame["experiment_tag"].str.startswith(
+            "uncertainty_resolution_x", na=False
+        )
         & frame["method"].isin(PRIMARY_METHODS)
     ].copy()
     resolution["factor"] = resolution["experiment_tag"].str.replace(
-        "anchor_resolution_x", "", regex=False
+        "uncertainty_resolution_x", "", regex=False
     )
     resolution_table = resolution.pivot_table(
         index=["method", "factor"],
@@ -326,7 +330,7 @@ def save_auxiliary_tables(
         frame["dataset"].isin(development)
         & frame["method"].isin(PRIMARY_METHODS)
         & frame["experiment_tag"].str.startswith(
-            "anchor_cross_backbone_", na=False
+            "uncertainty_cross_backbone_", na=False
         )
     ]
     cross_table = cross.pivot_table(
@@ -389,6 +393,7 @@ def save_efficiency(frame: pd.DataFrame, cfg: dict, output: Path) -> None:
 def save_summary(
     output: Path,
     top1: pd.DataFrame,
+    per_dataset: pd.DataFrame,
     aggregate: pd.DataFrame,
     datasets: list[str],
 ) -> None:
@@ -398,12 +403,19 @@ def save_summary(
         return float((target - top1.loc[baseline, datasets]).mean())
 
     context_delta = target - top1.loc["global_context", datasets]
+    context_pairs = per_dataset[
+        per_dataset["baseline"] == "global_context"
+    ]
+    total_rescue = int(context_pairs["rescue_count"].sum())
+    total_damage = int(context_pairs["damage_count"].sum())
+
     verdict = "PASS" if (
         delta("global_classname") > 0.0
         and delta("multicrop_classname") > 0.0
-        and delta("global_context") > 0.0
-        and int((context_delta > 0).sum()) >= 6
-        and float(context_delta.min()) > -5.0
+        and delta("global_context") >= 0.5
+        and int((context_delta > 0).sum()) >= 7
+        and float(context_delta.min()) >= -1.0
+        and total_rescue > total_damage
     ) else "REVIEW"
 
     lines = [
@@ -419,13 +431,16 @@ def save_summary(
         f"{int((context_delta == 0).sum())}/"
         f"{int((context_delta < 0).sum())}",
         f"- Worst dataset delta vs Global-Context: {float(context_delta.min()):.4f}",
+        f"- Total rescue/damage vs Global-Context: {total_rescue}/{total_damage}",
         "",
         "## Across-dataset significance",
         "",
         aggregate.to_markdown(index=False),
         "",
-        "The main comparison uses only external or controlled baselines. Earlier "
-        "in-house exploratory versions are not treated as competing methods.",
+        "ECE is not used for the paper decision because the controlled methods "
+        "do not share a calibrated probability scale.",
+        "",
+        "Earlier in-house exploratory versions are not treated as baselines.",
     ]
     (output / "paper_results_summary.md").write_text(
         "\n".join(lines), encoding="utf-8"
@@ -447,12 +462,13 @@ def main() -> None:
 
     frame = drop_latest(pd.read_csv(raw_path))
     tables = save_main_tables(frame, output, cfg["paper_protocol"])
-    aggregate = save_significance(cfg, output)
+    per_dataset, aggregate = save_significance(cfg, output)
     save_auxiliary_tables(frame, output, cfg["paper_protocol"])
     save_efficiency(frame, cfg, output)
     save_summary(
         output,
         tables["top1"],
+        per_dataset,
         aggregate,
         list(cfg["paper_protocol"]["all_datasets"]),
     )
