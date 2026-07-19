@@ -5,11 +5,9 @@ import torch
 
 from rap_transclip.multiview import build_view_specs
 from rap_transclip.object_context import (
-    class_view_consensus,
-    normalized_context_uncertainty,
+    context_anchored_object_residual_fusion,
     object_evidence_scores,
     run_object_context_inference,
-    uncertainty_gated_object_residual_fusion,
 )
 from rap_transclip.runner import _select_local_views
 from rap_transclip.utils import l2_normalize
@@ -60,17 +58,13 @@ def inference_config():
         "multicrop_local_weight": 0.5,
         "object_topk": 2,
         "object_view_topk": 2,
-        "class_consensus_view_topk": 2,
-        "class_consensus_center": 0.0,
-        "class_consensus_temperature": 0.5,
         "fixed_object_weight": 0.5,
         "score_chunk_size": 5,
         "global_temperature": 0.01,
         "fusion_temperature": 1.0,
-        "use_uncertainty_gate": True,
-        "uncertainty_temperature": 1.0,
         "positive_residual_only": True,
         "residual_weight": 0.5,
+        "use_object_gate": True,
         "object_gate_center": 0.0,
         "object_gate_temperature": 0.5,
         "max_residual_boost": 1.0,
@@ -103,7 +97,7 @@ def test_cached_local_view_subset_selection():
 
 def test_object_scores_have_expected_shape():
     _, local_features, _, _, object_texts, object_mask = synthetic_features()
-    scores, per_view = object_evidence_scores(
+    scores = object_evidence_scores(
         local_features,
         object_texts,
         object_mask,
@@ -112,7 +106,6 @@ def test_object_scores_have_expected_shape():
         image_chunk_size=5,
     )
     assert scores.shape == (12, 3)
-    assert per_view.shape == (12, 4, 3)
     assert torch.isfinite(scores).all()
 
 
@@ -122,14 +115,14 @@ def test_top_view_pooling_suppresses_single_view_outlier():
     )
     object_texts = torch.tensor([[[1.0, 0.0]]])
     object_mask = torch.ones(1, 1, dtype=torch.bool)
-    top1, _ = object_evidence_scores(
+    top1 = object_evidence_scores(
         local_features,
         object_texts,
         object_mask,
         object_topk=1,
         object_view_topk=1,
     )
-    top2, _ = object_evidence_scores(
+    top2 = object_evidence_scores(
         local_features,
         object_texts,
         object_mask,
@@ -139,75 +132,77 @@ def test_top_view_pooling_suppresses_single_view_outlier():
     assert top2.item() < top1.item()
 
 
-def test_class_consensus_is_bounded():
-    view_scores = torch.tensor(
-        [[[3.0, 0.0, -1.0], [2.5, 0.1, -0.5], [-0.2, 2.0, 0.0]]]
+def test_multiple_cues_can_change_class_evidence():
+    local_features = torch.tensor([[[1.0, 0.0], [0.8, 0.2]]])
+    object_texts = torch.tensor(
+        [
+            [[1.0, 0.0], [0.8, 0.2]],
+            [[0.0, 1.0], [0.2, 0.8]],
+        ]
     )
-    consensus = class_view_consensus(
-        view_scores,
-        view_topk=2,
-        center=0.0,
-        temperature=0.5,
+    object_mask = torch.ones(2, 2, dtype=torch.bool)
+    top1 = object_evidence_scores(
+        local_features,
+        object_texts,
+        object_mask,
+        object_topk=1,
+        object_view_topk=2,
     )
-    assert consensus.shape == (1, 3)
-    assert torch.all(consensus >= 0)
-    assert torch.all(consensus <= 1)
-
-
-def test_context_uncertainty_is_higher_for_ambiguous_scores():
-    scores = torch.tensor(
-        [[5.0, 0.0, -1.0], [0.1, 0.0, -0.1]]
+    top2 = object_evidence_scores(
+        local_features,
+        object_texts,
+        object_mask,
+        object_topk=2,
+        object_view_topk=2,
     )
-    uncertainty = normalized_context_uncertainty(scores, temperature=1.0)
-    assert uncertainty.shape == (2,)
-    assert uncertainty[1] > uncertainty[0]
-    assert torch.all(uncertainty >= 0)
-    assert torch.all(uncertainty <= 1)
+    assert top1.shape == top2.shape == (1, 2)
+    assert not torch.allclose(top1, top2)
 
 
 def test_positive_residual_never_reduces_context_scores():
     context = torch.tensor([[2.0, 0.5, -1.0], [0.1, 0.2, 0.3]])
     objects = torch.tensor([[0.2, 2.5, -0.5], [0.1, 0.2, 0.3]])
-    consensus = torch.ones_like(context)
     scores, weights, diagnostics, artifacts = (
-        uncertainty_gated_object_residual_fusion(
+        context_anchored_object_residual_fusion(
             context,
             objects,
-            consensus,
             inference_config(),
         )
     )
     assert scores.shape == context.shape
     assert torch.all(scores >= artifacts["context_scores"] - 1e-6)
     assert torch.all(weights >= 0)
-    assert 0 <= diagnostics["mean_context_uncertainty"] <= 1
+    assert diagnostics["mean_absolute_object_correction"] >= 0
 
 
-def test_uncertainty_gate_never_exceeds_ungated_correction():
-    context = torch.tensor([[5.0, 0.0, -1.0], [0.1, 0.0, -0.1]])
-    objects = torch.tensor([[0.0, 4.0, -1.0], [0.0, 4.0, -1.0]])
-    consensus = torch.ones_like(context)
-    gated_cfg = inference_config()
-    ungated_cfg = dict(gated_cfg)
-    ungated_cfg["use_uncertainty_gate"] = False
-    _, _, _, gated = uncertainty_gated_object_residual_fusion(
+def test_object_gate_bounds_effective_weight():
+    context = torch.tensor([[1.0, 0.0, -1.0]])
+    objects = torch.tensor([[2.0, 0.5, -0.5]])
+    cfg = inference_config()
+    _, weights, _, artifacts = context_anchored_object_residual_fusion(
         context,
         objects,
-        consensus,
-        gated_cfg,
+        cfg,
     )
-    _, _, _, ungated = uncertainty_gated_object_residual_fusion(
+    assert torch.all(weights >= 0)
+    assert torch.all(weights <= cfg["residual_weight"] + 1e-6)
+    assert torch.all(artifacts["object_gate"] >= 0)
+    assert torch.all(artifacts["object_gate"] <= 1)
+
+
+def test_disabling_object_gate_produces_uniform_weights():
+    context = torch.tensor([[1.0, 0.0, -1.0]])
+    objects = torch.tensor([[2.0, 0.5, -0.5]])
+    cfg = inference_config()
+    cfg["use_object_gate"] = False
+    _, weights, _, artifacts = context_anchored_object_residual_fusion(
         context,
         objects,
-        consensus,
-        ungated_cfg,
+        cfg,
     )
-    assert torch.all(
-        gated["object_correction"] <= ungated["object_correction"] + 1e-6
-    )
-    assert torch.any(
-        gated["object_correction"] < ungated["object_correction"] - 1e-6
-    )
+    expected = torch.full_like(weights, cfg["residual_weight"])
+    assert torch.allclose(weights, expected)
+    assert torch.allclose(artifacts["object_gate"], torch.ones_like(weights))
 
 
 def test_all_inference_probabilities_are_normalized():
