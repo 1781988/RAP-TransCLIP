@@ -23,14 +23,11 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 ABLATION_TAGS = [
-    "paper_ablation_view_topk1",
-    "paper_ablation_view_topk3",
-    "paper_ablation_no_consensus",
-    "paper_ablation_object_cue_topk1",
-    "paper_ablation_object_cue_topk3",
-    "paper_ablation_scale_050",
-    "paper_ablation_scale_075",
-    "paper_ablation_center_only",
+    "anchor_ablation_no_candidate",
+    "anchor_ablation_candidate_top3",
+    "anchor_ablation_candidate_top10",
+    "anchor_ablation_signed_residual",
+    "anchor_ablation_no_consensus",
 ]
 
 
@@ -60,65 +57,55 @@ def main() -> None:
     architecture = protocol["primary_architecture"]
     for dataset in protocol["all_datasets"]:
         for method in MAIN_METHODS:
-            expected.append(
-                {
-                    "dataset": dataset,
-                    "model": model,
-                    "architecture": architecture,
-                    "feature_variant": "clean",
-                    "method": method,
-                    "experiment_tag": "paper_main_georsclip",
-                }
-            )
-        for tag in ["paper_concept_shuffled", "paper_concept_generic"]:
-            expected.append(
-                {
-                    "dataset": dataset,
-                    "model": model,
-                    "architecture": architecture,
-                    "feature_variant": "clean",
-                    "method": "object_context",
-                    "experiment_tag": tag,
-                }
-            )
+            expected.append({
+                "dataset": dataset,
+                "model": model,
+                "architecture": architecture,
+                "feature_variant": "clean",
+                "method": method,
+                "experiment_tag": "anchor_main_georsclip",
+            })
+        for tag in ["anchor_concept_shuffled", "anchor_concept_generic"]:
+            expected.append({
+                "dataset": dataset,
+                "model": model,
+                "architecture": architecture,
+                "feature_variant": "clean",
+                "method": "object_context",
+                "experiment_tag": tag,
+            })
 
     for dataset in protocol["development_datasets"]:
         for tag in ABLATION_TAGS:
-            expected.append(
-                {
-                    "dataset": dataset,
-                    "model": model,
-                    "architecture": architecture,
-                    "feature_variant": "clean",
-                    "method": "object_context",
-                    "experiment_tag": tag,
-                }
-            )
+            expected.append({
+                "dataset": dataset,
+                "model": model,
+                "architecture": architecture,
+                "feature_variant": "clean",
+                "method": "object_context",
+                "experiment_tag": tag,
+            })
         for factor in [1, 2, 4, 8]:
             variant = "clean" if factor == 1 else f"downsample_x{factor}"
             for method in PRIMARY_METHODS:
-                expected.append(
-                    {
-                        "dataset": dataset,
-                        "model": model,
-                        "architecture": architecture,
-                        "feature_variant": variant,
-                        "method": method,
-                        "experiment_tag": f"paper_resolution_x{factor}",
-                    }
-                )
+                expected.append({
+                    "dataset": dataset,
+                    "model": model,
+                    "architecture": architecture,
+                    "feature_variant": variant,
+                    "method": method,
+                    "experiment_tag": f"anchor_resolution_x{factor}",
+                })
         for backbone in protocol["cross_backbone_models"]:
             for method in PRIMARY_METHODS:
-                expected.append(
-                    {
-                        "dataset": dataset,
-                        "model": backbone,
-                        "architecture": protocol["cross_backbone_architecture"],
-                        "feature_variant": "clean",
-                        "method": method,
-                        "experiment_tag": f"paper_cross_backbone_{backbone.lower()}",
-                    }
-                )
+                expected.append({
+                    "dataset": dataset,
+                    "model": backbone,
+                    "architecture": protocol["cross_backbone_architecture"],
+                    "feature_variant": "clean",
+                    "method": method,
+                    "experiment_tag": f"anchor_cross_backbone_{backbone.lower()}",
+                })
 
     missing = []
     for item in expected:
