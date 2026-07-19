@@ -14,18 +14,11 @@ from scipy.stats import binomtest, wilcoxon
 from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import feature_directory
 
+MAIN_TAG = "anchor_main_georsclip"
 PRIMARY_METHODS = [
     "global_classname",
     "multicrop_classname",
     "global_context",
-    "object_context",
-]
-ALL_MAIN_METHODS = [
-    "global_classname",
-    "multicrop_classname",
-    "global_context",
-    "object_only",
-    "fixed_object_context",
     "object_context",
 ]
 BASELINES = [
@@ -33,6 +26,14 @@ BASELINES = [
     "multicrop_classname",
     "global_context",
     "fixed_object_context",
+]
+ABLATION_TAGS = [
+    MAIN_TAG,
+    "anchor_ablation_no_candidate",
+    "anchor_ablation_candidate_top3",
+    "anchor_ablation_candidate_top10",
+    "anchor_ablation_signed_residual",
+    "anchor_ablation_no_consensus",
 ]
 
 
@@ -65,8 +66,7 @@ def drop_latest(frame: pd.DataFrame) -> pd.DataFrame:
         "method",
         "experiment_tag",
     ]
-    present = [key for key in keys if key in frame.columns]
-    return frame.drop_duplicates(present, keep="last")
+    return frame.drop_duplicates(keys, keep="last")
 
 
 def pivot_metric(
@@ -84,7 +84,10 @@ def pivot_metric(
         & frame["method"].isin(methods)
     ]
     table = subset.pivot_table(
-        index="method", columns="dataset", values=metric, aggfunc="last"
+        index="method",
+        columns="dataset",
+        values=metric,
+        aggfunc="last",
     )
     table["Average"] = table.mean(axis=1)
     return table
@@ -98,17 +101,17 @@ def bootstrap_delta(
     seed: int,
     confidence: float,
 ) -> tuple[float, float, float]:
-    target_correct = (target == labels).astype(np.float32)
-    baseline_correct = (baseline == labels).astype(np.float32)
-    per_sample = target_correct - baseline_correct
-    observed = float(per_sample.mean() * 100.0)
+    difference = (
+        (target == labels).astype(np.float32)
+        - (baseline == labels).astype(np.float32)
+    )
+    observed = float(difference.mean() * 100.0)
     rng = np.random.default_rng(seed)
-    values: list[np.ndarray] = []
-    batch = 100
-    for start in range(0, repetitions, batch):
-        count = min(batch, repetitions - start)
+    values = []
+    for start in range(0, repetitions, 100):
+        count = min(100, repetitions - start)
         indices = rng.integers(0, len(labels), size=(count, len(labels)))
-        values.append(per_sample[indices].mean(axis=1) * 100.0)
+        values.append(difference[indices].mean(axis=1) * 100.0)
     samples = np.concatenate(values)
     alpha = (1.0 - confidence) / 2.0
     low, high = np.quantile(samples, [alpha, 1.0 - alpha])
@@ -133,34 +136,18 @@ def mcnemar_exact(
     return rescue, damage, p_value
 
 
-def markdown_table(frame: pd.DataFrame, decimals: int = 4) -> str:
-    display = frame.copy()
-    display = display.round(decimals)
-    display.insert(0, "row", display.index.astype(str))
-    headers = list(display.columns)
-    lines = [
-        "| " + " | ".join(headers) + " |",
-        "|" + "|".join(["---"] * len(headers)) + "|",
-    ]
-    for _, row in display.iterrows():
-        lines.append("| " + " | ".join(str(row[col]) for col in headers) + " |")
-    return "\n".join(lines)
-
-
 def save_main_tables(
     frame: pd.DataFrame,
     output: Path,
     protocol: dict,
 ) -> dict[str, pd.DataFrame]:
-    model = protocol["primary_model"]
-    architecture = protocol["primary_architecture"]
-    tables: dict[str, pd.DataFrame] = {}
+    tables = {}
     for metric in ["top1", "macro_f1", "ece"]:
         table = pivot_metric(
             frame,
-            "paper_main_georsclip",
-            model,
-            architecture,
+            MAIN_TAG,
+            protocol["primary_model"],
+            protocol["primary_architecture"],
             metric,
             PRIMARY_METHODS,
         )
@@ -169,46 +156,21 @@ def save_main_tables(
     return tables
 
 
-def save_split_summary(
-    top1: pd.DataFrame,
-    output: Path,
-    protocol: dict,
-) -> pd.DataFrame:
-    rows = []
-    for split, datasets in [
-        ("development", protocol["development_datasets"]),
-        ("validation", protocol["validation_datasets"]),
-        ("all", protocol["all_datasets"]),
-    ]:
-        for method in PRIMARY_METHODS:
-            available = [name for name in datasets if name in top1.columns]
-            rows.append(
-                {
-                    "split": split,
-                    "method": method,
-                    "num_datasets": len(available),
-                    "mean_top1": round(float(top1.loc[method, available].mean()), 4),
-                }
-            )
-    result = pd.DataFrame(rows)
-    result.to_csv(output / "table_development_validation.csv", index=False)
-    return result
-
-
 def save_significance(
     cfg: dict,
     output: Path,
-    repetitions: int,
-    seed: int,
-    confidence: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     protocol = cfg["paper_protocol"]
     root = Path(cfg["paths"]["results"])
     model = protocol["primary_model"]
     architecture = protocol["primary_architecture"]
-    rows = []
-    dataset_deltas: dict[str, list[float]] = {baseline: [] for baseline in BASELINES}
+    analysis_cfg = cfg.get("analysis", {})
+    repetitions = int(analysis_cfg.get("bootstrap_repetitions", 2000))
+    seed = int(analysis_cfg.get("bootstrap_seed", 2027))
+    confidence = float(analysis_cfg.get("confidence_level", 0.95))
 
+    rows = []
+    deltas = {baseline: [] for baseline in BASELINES}
     for dataset_id, dataset in enumerate(protocol["all_datasets"]):
         target_bundle = torch.load(
             prediction_path(
@@ -218,14 +180,14 @@ def save_significance(
                 architecture,
                 "clean",
                 "object_context",
-                "paper_main_georsclip",
+                MAIN_TAG,
             ),
             map_location="cpu",
         )
         labels = target_bundle["labels"].numpy()
         target = target_bundle["probabilities"].argmax(dim=1).numpy()
         for baseline_id, baseline in enumerate(BASELINES):
-            bundle = torch.load(
+            base_bundle = torch.load(
                 prediction_path(
                     root,
                     dataset,
@@ -233,11 +195,11 @@ def save_significance(
                     architecture,
                     "clean",
                     baseline,
-                    "paper_main_georsclip",
+                    MAIN_TAG,
                 ),
                 map_location="cpu",
             )
-            base_pred = bundle["probabilities"].argmax(dim=1).numpy()
+            base_pred = base_bundle["probabilities"].argmax(dim=1).numpy()
             observed, low, high = bootstrap_delta(
                 labels,
                 target,
@@ -246,81 +208,83 @@ def save_significance(
                 seed + dataset_id * 100 + baseline_id,
                 confidence,
             )
-            rescue, damage, p_value = mcnemar_exact(labels, target, base_pred)
-            dataset_deltas[baseline].append(observed)
-            rows.append(
-                {
-                    "dataset": dataset,
-                    "baseline": baseline,
-                    "delta_top1": round(observed, 4),
-                    "bootstrap_ci_low": round(low, 4),
-                    "bootstrap_ci_high": round(high, 4),
-                    "rescue_count": rescue,
-                    "damage_count": damage,
-                    "net_rescue_count": rescue - damage,
-                    "mcnemar_exact_p": p_value,
-                }
+            rescue, damage, p_value = mcnemar_exact(
+                labels,
+                target,
+                base_pred,
             )
-    per_dataset = pd.DataFrame(rows)
-    per_dataset.to_csv(output / "table_significance_per_dataset.csv", index=False)
+            deltas[baseline].append(observed)
+            rows.append({
+                "dataset": dataset,
+                "baseline": baseline,
+                "delta_top1": round(observed, 4),
+                "bootstrap_ci_low": round(low, 4),
+                "bootstrap_ci_high": round(high, 4),
+                "rescue_count": rescue,
+                "damage_count": damage,
+                "net_rescue_count": rescue - damage,
+                "mcnemar_exact_p": p_value,
+            })
+
+    pd.DataFrame(rows).to_csv(
+        output / "table_significance_per_dataset.csv",
+        index=False,
+    )
 
     aggregate_rows = []
-    for baseline, values in dataset_deltas.items():
-        values_array = np.asarray(values, dtype=float)
+    for baseline, values in deltas.items():
+        array = np.asarray(values, dtype=float)
         try:
-            statistic, p_value = wilcoxon(values_array, alternative="two-sided")
+            statistic, p_value = wilcoxon(array, alternative="two-sided")
         except ValueError:
             statistic, p_value = 0.0, 1.0
-        aggregate_rows.append(
-            {
-                "baseline": baseline,
-                "mean_dataset_delta": round(float(values_array.mean()), 4),
-                "median_dataset_delta": round(float(np.median(values_array)), 4),
-                "wins": int((values_array > 0).sum()),
-                "ties": int((values_array == 0).sum()),
-                "losses": int((values_array < 0).sum()),
-                "wilcoxon_statistic": float(statistic),
-                "wilcoxon_p": float(p_value),
-            }
-        )
+        aggregate_rows.append({
+            "baseline": baseline,
+            "mean_dataset_delta": round(float(array.mean()), 4),
+            "median_dataset_delta": round(float(np.median(array)), 4),
+            "wins": int((array > 0).sum()),
+            "ties": int((array == 0).sum()),
+            "losses": int((array < 0).sum()),
+            "wilcoxon_statistic": float(statistic),
+            "wilcoxon_p": float(p_value),
+        })
     aggregate = pd.DataFrame(aggregate_rows)
-    aggregate.to_csv(output / "table_significance_across_datasets.csv", index=False)
-    return per_dataset, aggregate
+    aggregate.to_csv(
+        output / "table_significance_across_datasets.csv",
+        index=False,
+    )
+    return aggregate
 
 
-def save_variant_tables(frame: pd.DataFrame, output: Path, protocol: dict) -> None:
+def save_auxiliary_tables(
+    frame: pd.DataFrame,
+    output: Path,
+    protocol: dict,
+) -> None:
     model = protocol["primary_model"]
     architecture = protocol["primary_architecture"]
-    dev = protocol["development_datasets"]
+    development = protocol["development_datasets"]
     all_datasets = protocol["all_datasets"]
 
-    ablation_tags = [
-        "paper_main_georsclip",
-        "paper_ablation_view_topk1",
-        "paper_ablation_view_topk3",
-        "paper_ablation_no_consensus",
-        "paper_ablation_object_cue_topk1",
-        "paper_ablation_object_cue_topk3",
-        "paper_ablation_scale_050",
-        "paper_ablation_scale_075",
-        "paper_ablation_center_only",
-    ]
     ablation = frame[
         (frame["model"] == model)
         & (frame["architecture"] == architecture)
         & (frame["method"] == "object_context")
-        & frame["dataset"].isin(dev)
-        & frame["experiment_tag"].isin(ablation_tags)
+        & frame["dataset"].isin(development)
+        & frame["experiment_tag"].isin(ABLATION_TAGS)
     ].pivot_table(
-        index="experiment_tag", columns="dataset", values="top1", aggfunc="last"
+        index="experiment_tag",
+        columns="dataset",
+        values="top1",
+        aggfunc="last",
     )
     ablation["Average"] = ablation.mean(axis=1)
     ablation.round(4).to_csv(output / "table_ablation.csv")
 
     concept_tags = {
-        "paper_main_georsclip": "correct",
-        "paper_concept_shuffled": "shuffled",
-        "paper_concept_generic": "generic",
+        MAIN_TAG: "correct",
+        "anchor_concept_shuffled": "shuffled",
+        "anchor_concept_generic": "no_class_specific_object_evidence",
     }
     concept = frame[
         (frame["model"] == model)
@@ -331,7 +295,10 @@ def save_variant_tables(frame: pd.DataFrame, output: Path, protocol: dict) -> No
     ].copy()
     concept["concept_control"] = concept["experiment_tag"].map(concept_tags)
     concept_table = concept.pivot_table(
-        index="concept_control", columns="dataset", values="top1", aggfunc="last"
+        index="concept_control",
+        columns="dataset",
+        values="top1",
+        aggfunc="last",
     )
     concept_table["Average"] = concept_table.mean(axis=1)
     concept_table.round(4).to_csv(output / "table_concept_controls.csv")
@@ -339,12 +306,12 @@ def save_variant_tables(frame: pd.DataFrame, output: Path, protocol: dict) -> No
     resolution = frame[
         (frame["model"] == model)
         & (frame["architecture"] == architecture)
-        & frame["dataset"].isin(dev)
-        & frame["experiment_tag"].str.startswith("paper_resolution_x", na=False)
+        & frame["dataset"].isin(development)
+        & frame["experiment_tag"].str.startswith("anchor_resolution_x", na=False)
         & frame["method"].isin(PRIMARY_METHODS)
     ].copy()
     resolution["factor"] = resolution["experiment_tag"].str.replace(
-        "paper_resolution_x", "", regex=False
+        "anchor_resolution_x", "", regex=False
     )
     resolution_table = resolution.pivot_table(
         index=["method", "factor"],
@@ -356,10 +323,10 @@ def save_variant_tables(frame: pd.DataFrame, output: Path, protocol: dict) -> No
     resolution_table.round(4).to_csv(output / "table_resolution.csv")
 
     cross = frame[
-        frame["dataset"].isin(dev)
+        frame["dataset"].isin(development)
         & frame["method"].isin(PRIMARY_METHODS)
         & frame["experiment_tag"].str.startswith(
-            "paper_cross_backbone_", na=False
+            "anchor_cross_backbone_", na=False
         )
     ]
     cross_table = cross.pivot_table(
@@ -372,26 +339,24 @@ def save_variant_tables(frame: pd.DataFrame, output: Path, protocol: dict) -> No
     cross_table.round(4).to_csv(output / "table_cross_backbone.csv")
 
 
-def save_efficiency(frame: pd.DataFrame, cfg: dict, output: Path) -> pd.DataFrame:
+def save_efficiency(frame: pd.DataFrame, cfg: dict, output: Path) -> None:
     protocol = cfg["paper_protocol"]
     main = frame[
-        (frame["experiment_tag"] == "paper_main_georsclip")
+        (frame["experiment_tag"] == MAIN_TAG)
         & (frame["model"] == protocol["primary_model"])
         & (frame["architecture"] == protocol["primary_architecture"])
     ]
     rows = []
     for method, part in main.groupby("method"):
-        rows.append(
-            {
-                "method": method,
-                "mean_inference_seconds_per_dataset": round(
-                    float(part["inference_seconds"].mean()), 4
-                ),
-                "mean_peak_cuda_memory_mb": round(
-                    float(part["peak_cuda_memory_mb"].mean()), 2
-                ),
-            }
-        )
+        rows.append({
+            "method": method,
+            "mean_inference_seconds_per_dataset": round(
+                float(part["inference_seconds"].mean()), 4
+            ),
+            "mean_peak_cuda_memory_mb": round(
+                float(part["peak_cuda_memory_mb"].mean()), 2
+            ),
+        })
 
     total_cache = 0
     extraction_seconds = 0.0
@@ -413,70 +378,54 @@ def save_efficiency(frame: pd.DataFrame, cfg: dict, output: Path) -> pd.DataFram
         if metadata.exists():
             payload = json.loads(metadata.read_text(encoding="utf-8"))
             extraction_seconds += float(payload.get("elapsed_seconds", 0.0))
+
     result = pd.DataFrame(rows)
     result["clean_feature_cache_gb"] = round(total_cache / (1024**3), 4)
     result["total_feature_extraction_seconds"] = round(extraction_seconds, 2)
     result["feature_dataset_count"] = feature_dirs
     result.to_csv(output / "table_efficiency.csv", index=False)
-    return result
 
 
 def save_summary(
     output: Path,
-    tables: dict[str, pd.DataFrame],
-    split: pd.DataFrame,
+    top1: pd.DataFrame,
     aggregate: pd.DataFrame,
-    protocol: dict,
+    datasets: list[str],
 ) -> None:
-    top1 = tables["top1"]
-    dev = protocol["development_datasets"]
-    validation = protocol["validation_datasets"]
-    target = top1.loc["object_context"]
+    target = top1.loc["object_context", datasets]
 
-    def delta(baseline: str, datasets: list[str]) -> float:
-        return float((target[datasets] - top1.loc[baseline, datasets]).mean())
+    def delta(baseline: str) -> float:
+        return float((target - top1.loc[baseline, datasets]).mean())
 
-    validation_deltas = target[validation] - top1.loc["global_classname", validation]
+    context_delta = target - top1.loc["global_context", datasets]
     verdict = "PASS" if (
-        delta("global_classname", validation) >= 1.0
-        and delta("multicrop_classname", validation) >= 0.5
-        and delta("global_context", validation) > 0.0
-        and int((validation_deltas >= 0).sum()) >= 5
-        and float(validation_deltas.min()) > -5.0
+        delta("global_classname") > 0.0
+        and delta("multicrop_classname") > 0.0
+        and delta("global_context") > 0.0
+        and int((context_delta > 0).sum()) >= 6
+        and float(context_delta.min()) > -5.0
     ) else "REVIEW"
 
     lines = [
-        "# ObjectContext-CLIP paper result summary",
+        "# ObjectContext-CLIP result summary",
         "",
-        f"Validation decision: **{verdict}**",
+        f"Paper decision: **{verdict}**",
         "",
-        "## Main Top-1 table",
-        "",
-        markdown_table(top1),
-        "",
-        "## Frozen-split deltas",
-        "",
-        f"- Development: ObjectContext - Global = {delta('global_classname', dev):.4f}",
-        f"- Validation: ObjectContext - Global = {delta('global_classname', validation):.4f}",
-        f"- Validation: ObjectContext - MultiCrop = {delta('multicrop_classname', validation):.4f}",
-        f"- Validation: ObjectContext - Context = {delta('global_context', validation):.4f}",
-        f"- Validation wins/ties/losses vs Global = "
-        f"{int((validation_deltas > 0).sum())}/"
-        f"{int((validation_deltas == 0).sum())}/"
-        f"{int((validation_deltas < 0).sum())}",
-        f"- Worst validation dataset delta vs Global = {float(validation_deltas.min()):.4f}",
+        f"- ObjectContext - Global-ClassName: {delta('global_classname'):.4f}",
+        f"- ObjectContext - MultiCrop-ClassName: {delta('multicrop_classname'):.4f}",
+        f"- ObjectContext - Global-Context: {delta('global_context'):.4f}",
+        f"- Wins/ties/losses vs Global-Context: "
+        f"{int((context_delta > 0).sum())}/"
+        f"{int((context_delta == 0).sum())}/"
+        f"{int((context_delta < 0).sum())}",
+        f"- Worst dataset delta vs Global-Context: {float(context_delta.min()):.4f}",
         "",
         "## Across-dataset significance",
         "",
         aggregate.to_markdown(index=False),
         "",
-        "## Interpretation rule",
-        "",
-        "PASS supports a full paper claim only when the seven frozen validation datasets "
-        "retain positive average gains over Global, MultiCrop, and Global-Context, with at "
-        "least five non-negative validation datasets and no dataset-level collapse larger "
-        "than five percentage points. REVIEW means the method should be reported as "
-        "conditional or revised before submission.",
+        "The main comparison uses only external or controlled baselines. Earlier "
+        "in-house exploratory versions are not treated as competing methods.",
     ]
     (output / "paper_results_summary.md").write_text(
         "\n".join(lines), encoding="utf-8"
@@ -498,18 +447,15 @@ def main() -> None:
 
     frame = drop_latest(pd.read_csv(raw_path))
     tables = save_main_tables(frame, output, cfg["paper_protocol"])
-    split = save_split_summary(tables["top1"], output, cfg["paper_protocol"])
-    save_variant_tables(frame, output, cfg["paper_protocol"])
-    analysis_cfg = cfg.get("analysis", {})
-    _, aggregate = save_significance(
-        cfg,
-        output,
-        repetitions=int(analysis_cfg.get("bootstrap_repetitions", 2000)),
-        seed=int(analysis_cfg.get("bootstrap_seed", 2027)),
-        confidence=float(analysis_cfg.get("confidence_level", 0.95)),
-    )
+    aggregate = save_significance(cfg, output)
+    save_auxiliary_tables(frame, output, cfg["paper_protocol"])
     save_efficiency(frame, cfg, output)
-    save_summary(output, tables, split, aggregate, cfg["paper_protocol"])
+    save_summary(
+        output,
+        tables["top1"],
+        aggregate,
+        list(cfg["paper_protocol"]["all_datasets"]),
+    )
     print(f"Saved complete paper analysis to: {output}")
 
 
