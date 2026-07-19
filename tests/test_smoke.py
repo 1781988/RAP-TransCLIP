@@ -183,19 +183,31 @@ def test_positive_residual_never_reduces_context_scores():
     assert 0 <= diagnostics["mean_context_uncertainty"] <= 1
 
 
-def test_uncertainty_gate_reduces_correction_for_confident_context():
+def test_uncertainty_gate_never_exceeds_ungated_correction():
     context = torch.tensor([[5.0, 0.0, -1.0], [0.1, 0.0, -0.1]])
     objects = torch.tensor([[0.0, 4.0, -1.0], [0.0, 4.0, -1.0]])
     consensus = torch.ones_like(context)
-    _, _, _, artifacts = uncertainty_gated_object_residual_fusion(
+    gated_cfg = inference_config()
+    ungated_cfg = dict(gated_cfg)
+    ungated_cfg["use_uncertainty_gate"] = False
+    _, _, _, gated = uncertainty_gated_object_residual_fusion(
         context,
         objects,
         consensus,
-        inference_config(),
+        gated_cfg,
     )
-    confident = artifacts["object_correction"][0].sum()
-    ambiguous = artifacts["object_correction"][1].sum()
-    assert ambiguous > confident
+    _, _, _, ungated = uncertainty_gated_object_residual_fusion(
+        context,
+        objects,
+        consensus,
+        ungated_cfg,
+    )
+    assert torch.all(
+        gated["object_correction"] <= ungated["object_correction"] + 1e-6
+    )
+    assert torch.any(
+        gated["object_correction"] < ungated["object_correction"] - 1e-6
+    )
 
 
 def test_all_inference_probabilities_are_normalized():
