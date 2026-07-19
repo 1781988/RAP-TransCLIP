@@ -21,6 +21,7 @@ dependencies = [
   "open-clip-torch>=2.26",
   "huggingface-hub>=0.23",
   "requests>=2.31",
+  "tabulate>=0.9",
 ]
 
 [project.scripts]
