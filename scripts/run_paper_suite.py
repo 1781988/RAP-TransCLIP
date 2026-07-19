@@ -12,7 +12,7 @@ from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import extract_features, feature_variant
 from rap_transclip.runner import run_experiment
 
-MAIN_TAG = "anchor_main_georsclip"
+MAIN_TAG = "uncertainty_main_georsclip"
 MAIN_METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -28,19 +28,18 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 
-# These are mechanism ablations of the final method, not comparisons with an
-# earlier in-house version.
+# Mechanism ablations of the final method. Global-Context already serves as the
+# no-local-residual control in the main table.
 ABLATIONS = [
-    ("anchor_ablation_no_candidate", {"context_candidate_topk": 0}),
-    ("anchor_ablation_candidate_top3", {"context_candidate_topk": 3}),
-    ("anchor_ablation_candidate_top10", {"context_candidate_topk": 10}),
-    ("anchor_ablation_signed_residual", {"positive_residual_only": False}),
-    ("anchor_ablation_no_consensus", {"class_consensus_power": 0.0}),
+    ("uncertainty_ablation_no_gate", {"use_uncertainty_gate": False}),
+    ("uncertainty_ablation_signed_residual", {"positive_residual_only": False}),
+    ("uncertainty_ablation_single_view", {"object_view_topk": 1}),
+    ("uncertainty_ablation_single_cue", {"object_topk": 1}),
 ]
 
 CONCEPT_CONTROLS = [
-    ("anchor_concept_shuffled", "shuffled"),
-    ("anchor_concept_generic", "generic"),
+    ("uncertainty_concept_shuffled", "shuffled"),
+    ("uncertainty_concept_generic", "generic"),
 ]
 
 
@@ -212,7 +211,7 @@ def run_concepts(args, base: dict) -> None:
 def run_resolution(args, base: dict) -> None:
     protocol = base["paper_protocol"]
     for factor in args.resolution_factors:
-        cfg = _copy_with(base, tag=f"anchor_resolution_x{factor}")
+        cfg = _copy_with(base, tag=f"uncertainty_resolution_x{factor}")
         cfg["feature_extraction"]["downsample_factor"] = int(factor)
         cfg["feature_extraction"]["variant"] = (
             "clean" if factor == 1 else f"downsample_x{factor}"
@@ -235,7 +234,7 @@ def run_cross_backbone(args, base: dict) -> None:
     for model in protocol["cross_backbone_models"]:
         cfg = _copy_with(
             base,
-            tag=f"anchor_cross_backbone_{model.lower()}",
+            tag=f"uncertainty_cross_backbone_{model.lower()}",
             model=model,
         )
         _run_grid(
