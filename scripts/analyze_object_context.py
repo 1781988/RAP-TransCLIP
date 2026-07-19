@@ -11,7 +11,6 @@ import torch
 from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import feature_directory, feature_variant
 
-
 METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -46,7 +45,6 @@ def prediction_path(
     path = result_root / "predictions" / f"{stem}.pt"
     if path.exists():
         return path
-
     legacy = "__".join(
         safe_name(item)
         for item in (dataset, model, architecture, variant, method)
@@ -85,16 +83,16 @@ def _artifacts(bundle: dict) -> dict[str, torch.Tensor]:
 
 
 def _routing_metrics(
-    global_pred: torch.Tensor,
+    context_pred: torch.Tensor,
     final_pred: torch.Tensor,
     labels: torch.Tensor,
     mask: torch.Tensor,
     final_bundle: dict,
 ) -> dict[str, float | int]:
-    global_correct = global_pred == labels
+    context_correct = context_pred == labels
     final_correct = final_pred == labels
-    rescue = (~global_correct) & final_correct & mask
-    damage = global_correct & (~final_correct) & mask
+    rescue = (~context_correct) & final_correct & mask
+    damage = context_correct & (~final_correct) & mask
 
     artifacts = _artifacts(final_bundle)
     object_weights = _true_class_values(
@@ -109,17 +107,19 @@ def _routing_metrics(
         artifacts.get("class_gate"),
         labels,
     )
-    branch_weight = artifacts.get("object_branch_weight")
+    context_uncertainty = artifacts.get("context_uncertainty")
 
     result: dict[str, float | int] = {
-        "rescue_count": int(rescue.sum().item()),
-        "damage_count": int(damage.sum().item()),
-        "net_rescue_count": int(rescue.sum().item() - damage.sum().item()),
-        "rescue_rate": round(
+        "rescue_count_vs_context": int(rescue.sum().item()),
+        "damage_count_vs_context": int(damage.sum().item()),
+        "net_rescue_count_vs_context": int(
+            rescue.sum().item() - damage.sum().item()
+        ),
+        "rescue_rate_vs_context": round(
             float(rescue.sum().item() / max(int(mask.sum().item()), 1) * 100.0),
             4,
         ),
-        "damage_rate": round(
+        "damage_rate_vs_context": round(
             float(damage.sum().item() / max(int(mask.sum().item()), 1) * 100.0),
             4,
         ),
@@ -128,7 +128,7 @@ def _routing_metrics(
         ("mean_true_class_object_weight", object_weights),
         ("mean_true_class_consensus", true_consensus),
         ("mean_true_class_gate", true_gate),
-        ("mean_object_branch_weight", branch_weight),
+        ("mean_context_uncertainty", context_uncertainty),
     ]:
         value = _mean_optional(tensor, mask)
         if value is not None:
@@ -138,7 +138,7 @@ def _routing_metrics(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/standard.yaml")
+    parser.add_argument("--config", default="configs/paper.yaml")
     parser.add_argument(
         "--datasets",
         nargs="+",
@@ -158,7 +158,7 @@ def main() -> None:
     experiment_tag = args.experiment_tag or str(
         cfg.get("runtime", {}).get(
             "experiment_tag",
-            "object_context_refined_v2",
+            "uncertainty_main_georsclip",
         )
     )
     variant = feature_variant(cfg)
@@ -187,46 +187,41 @@ def main() -> None:
             f"No rows found for experiment_tag={experiment_tag!r}"
         )
 
-    pilot = subset.pivot_table(
+    comparison = subset.pivot_table(
         index="method",
         columns="dataset",
         values="top1",
         aggfunc="last",
     )
-    pilot["Average"] = pilot.mean(axis=1)
-    pilot_output = result_root / "pilot_comparison_refined.csv"
-    pilot.round(4).to_csv(pilot_output)
-    print("\nPilot Top-1 comparison")
-    print(pilot.round(4).to_string())
+    comparison["Average"] = comparison.mean(axis=1)
+    comparison_output = result_root / "main_comparison.csv"
+    comparison.round(4).to_csv(comparison_output)
+    print("\nMain Top-1 comparison")
+    print(comparison.round(4).to_string())
 
-    decision_output = None
-    if "object_context" in pilot.index:
-        decision_rows = []
-        target = float(pilot.loc["object_context", "Average"])
+    decision_rows = []
+    if "object_context" in comparison.index:
+        target = float(comparison.loc["object_context", "Average"])
         for baseline in [
             "global_classname",
             "multicrop_classname",
             "global_context",
             "fixed_object_context",
         ]:
-            if baseline not in pilot.index:
+            if baseline not in comparison.index:
                 continue
-            value = float(pilot.loc[baseline, "Average"])
-            decision_rows.append(
-                {
-                    "comparison": f"object_context_minus_{baseline}",
-                    "object_context_average": round(target, 4),
-                    "baseline_average": round(value, 4),
-                    "delta": round(target - value, 4),
-                }
-            )
-        decision = pd.DataFrame(decision_rows)
-        decision_output = result_root / "pilot_decision_refined.csv"
-        decision.to_csv(decision_output, index=False)
+            value = float(comparison.loc[baseline, "Average"])
+            decision_rows.append({
+                "comparison": f"object_context_minus_{baseline}",
+                "object_context_average": round(target, 4),
+                "baseline_average": round(value, 4),
+                "delta": round(target - value, 4),
+            })
+    decision_output = result_root / "main_decision.csv"
+    pd.DataFrame(decision_rows).to_csv(decision_output, index=False)
 
     group_rows: list[dict] = []
     class_rows: list[dict] = []
-
     for dataset in args.datasets:
         feature_dir = feature_directory(
             cfg,
@@ -254,7 +249,7 @@ def main() -> None:
             )
             bundles[method] = torch.load(path, map_location="cpu")
 
-        labels = bundles["global_classname"]["labels"].long()
+        labels = bundles["global_context"]["labels"].long()
         predictions = {
             method: bundles[method]["probabilities"].argmax(dim=1)
             for method in METHODS
@@ -286,9 +281,13 @@ def main() -> None:
                     _accuracy(predictions[method][mask], labels[mask]),
                     4,
                 )
+            row["object_context_minus_context"] = round(
+                row["object_context_top1"] - row["global_context_top1"],
+                4,
+            )
             row.update(
                 _routing_metrics(
-                    predictions["global_classname"],
+                    predictions["global_context"],
                     predictions["object_context"],
                     labels,
                     mask,
@@ -321,7 +320,8 @@ def main() -> None:
                 4,
             )
             row["object_context_minus_multicrop"] = round(
-                row["object_context_top1"] - row["multicrop_classname_top1"],
+                row["object_context_top1"]
+                - row["multicrop_classname_top1"],
                 4,
             )
             row["object_context_minus_context"] = round(
@@ -330,7 +330,7 @@ def main() -> None:
             )
             row.update(
                 _routing_metrics(
-                    predictions["global_classname"],
+                    predictions["global_context"],
                     predictions["object_context"],
                     labels,
                     mask,
@@ -339,19 +339,13 @@ def main() -> None:
             )
             class_rows.append(row)
 
-    group_frame = pd.DataFrame(group_rows)
-    group_output = result_root / "semantic_group_analysis_refined.csv"
-    group_frame.to_csv(group_output, index=False)
-    print("\nSemantic-group analysis")
-    print(group_frame.to_string(index=False))
+    group_output = result_root / "semantic_group_analysis.csv"
+    pd.DataFrame(group_rows).to_csv(group_output, index=False)
+    class_output = result_root / "classwise_analysis.csv"
+    pd.DataFrame(class_rows).to_csv(class_output, index=False)
 
-    class_frame = pd.DataFrame(class_rows)
-    class_output = result_root / "classwise_analysis_refined.csv"
-    class_frame.to_csv(class_output, index=False)
-
-    print(f"\nSaved: {pilot_output}")
-    if decision_output is not None:
-        print(f"Saved: {decision_output}")
+    print(f"\nSaved: {comparison_output}")
+    print(f"Saved: {decision_output}")
     print(f"Saved: {group_output}")
     print(f"Saved: {class_output}")
 
