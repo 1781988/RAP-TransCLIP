@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -14,7 +13,7 @@ from scipy.stats import binomtest, wilcoxon
 from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import feature_directory
 
-MAIN_TAG = "uncertainty_main_georsclip"
+MAIN_TAG = "core_main_georsclip"
 PRIMARY_METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -29,10 +28,10 @@ BASELINES = [
 ]
 ABLATION_TAGS = [
     MAIN_TAG,
-    "uncertainty_ablation_no_gate",
-    "uncertainty_ablation_signed_residual",
-    "uncertainty_ablation_single_view",
-    "uncertainty_ablation_single_cue",
+    "core_ablation_no_object_gate",
+    "core_ablation_signed_residual",
+    "core_ablation_single_view",
+    "core_ablation_single_cue",
 ]
 
 
@@ -74,7 +73,7 @@ def pivot_metric(
     model: str,
     architecture: str,
     metric: str,
-    methods: Iterable[str],
+    methods: list[str],
 ) -> pd.DataFrame:
     subset = frame[
         (frame["experiment_tag"] == tag)
@@ -106,14 +105,14 @@ def bootstrap_delta(
     )
     observed = float(difference.mean() * 100.0)
     rng = np.random.default_rng(seed)
-    values = []
+    samples = []
     for start in range(0, repetitions, 100):
         count = min(100, repetitions - start)
         indices = rng.integers(0, len(labels), size=(count, len(labels)))
-        values.append(difference[indices].mean(axis=1) * 100.0)
-    samples = np.concatenate(values)
+        samples.append(difference[indices].mean(axis=1) * 100.0)
+    values = np.concatenate(samples)
     alpha = (1.0 - confidence) / 2.0
-    low, high = np.quantile(samples, [alpha, 1.0 - alpha])
+    low, high = np.quantile(values, [alpha, 1.0 - alpha])
     return observed, float(low), float(high)
 
 
@@ -141,8 +140,6 @@ def save_main_tables(
     protocol: dict,
 ) -> dict[str, pd.DataFrame]:
     tables = {}
-    # ECE is intentionally excluded: the controlled methods use different logit
-    # constructions, so uncalibrated probability scales are not comparable.
     for metric in ["top1", "macro_f1"]:
         table = pivot_metric(
             frame,
@@ -285,8 +282,8 @@ def save_auxiliary_tables(
 
     concept_tags = {
         MAIN_TAG: "correct",
-        "uncertainty_concept_shuffled": "shuffled",
-        "uncertainty_concept_generic": "no_class_specific_object_evidence",
+        "core_concept_shuffled": "shuffled",
+        "core_concept_generic": "no_class_specific_object_evidence",
     }
     concept = frame[
         (frame["model"] == model)
@@ -309,13 +306,11 @@ def save_auxiliary_tables(
         (frame["model"] == model)
         & (frame["architecture"] == architecture)
         & frame["dataset"].isin(development)
-        & frame["experiment_tag"].str.startswith(
-            "uncertainty_resolution_x", na=False
-        )
+        & frame["experiment_tag"].str.startswith("core_resolution_x", na=False)
         & frame["method"].isin(PRIMARY_METHODS)
     ].copy()
     resolution["factor"] = resolution["experiment_tag"].str.replace(
-        "uncertainty_resolution_x", "", regex=False
+        "core_resolution_x", "", regex=False
     )
     resolution_table = resolution.pivot_table(
         index=["method", "factor"],
@@ -330,7 +325,7 @@ def save_auxiliary_tables(
         frame["dataset"].isin(development)
         & frame["method"].isin(PRIMARY_METHODS)
         & frame["experiment_tag"].str.startswith(
-            "uncertainty_cross_backbone_", na=False
+            "core_cross_backbone_", na=False
         )
     ]
     cross_table = cross.pivot_table(
@@ -419,7 +414,7 @@ def save_summary(
     ) else "REVIEW"
 
     lines = [
-        "# ObjectContext-CLIP result summary",
+        "# ObjectContext-CLIP core-result summary",
         "",
         f"Paper decision: **{verdict}**",
         "",
@@ -437,10 +432,9 @@ def save_summary(
         "",
         aggregate.to_markdown(index=False),
         "",
-        "ECE is not used for the paper decision because the controlled methods "
-        "do not share a calibrated probability scale.",
+        "ECE is excluded because the controlled methods do not share a calibrated probability scale.",
         "",
-        "Earlier in-house exploratory versions are not treated as baselines.",
+        "Only controlled baselines and focused component ablations are used. Internal historical versions are not baselines.",
     ]
     (output / "paper_results_summary.md").write_text(
         "\n".join(lines), encoding="utf-8"

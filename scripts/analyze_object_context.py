@@ -33,39 +33,25 @@ def prediction_path(
     method: str,
     experiment_tag: str,
 ) -> Path:
-    items = (
-        dataset,
-        model,
-        architecture,
-        variant,
-        method,
-        experiment_tag,
+    stem = "__".join(
+        safe_name(item)
+        for item in (
+            dataset,
+            model,
+            architecture,
+            variant,
+            method,
+            experiment_tag,
+        )
     )
-    stem = "__".join(safe_name(item) for item in items)
     path = result_root / "predictions" / f"{stem}.pt"
     if path.exists():
         return path
-    legacy = "__".join(
-        safe_name(item)
-        for item in (dataset, model, architecture, variant, method)
-    )
-    legacy_path = result_root / "predictions" / f"{legacy}.pt"
-    if legacy_path.exists():
-        return legacy_path
     raise FileNotFoundError(path)
 
 
 def _accuracy(predictions: torch.Tensor, labels: torch.Tensor) -> float:
     return float((predictions == labels).float().mean().item() * 100.0)
-
-
-def _mean_optional(
-    tensor: torch.Tensor | None,
-    mask: torch.Tensor,
-) -> float | None:
-    if tensor is None:
-        return None
-    return float(tensor[mask].float().mean().item())
 
 
 def _true_class_values(
@@ -75,6 +61,15 @@ def _true_class_values(
     if matrix is None or matrix.ndim != 2:
         return None
     return matrix[torch.arange(len(labels)), labels]
+
+
+def _mean_optional(
+    tensor: torch.Tensor | None,
+    mask: torch.Tensor,
+) -> float | None:
+    if tensor is None:
+        return None
+    return float(tensor[mask].float().mean().item())
 
 
 def _artifacts(bundle: dict) -> dict[str, torch.Tensor]:
@@ -95,19 +90,22 @@ def _routing_metrics(
     damage = context_correct & (~final_correct) & mask
 
     artifacts = _artifacts(final_bundle)
-    object_weights = _true_class_values(
+    true_weight = _true_class_values(
         final_bundle.get("object_weights"),
         labels,
     )
-    true_consensus = _true_class_values(
-        artifacts.get("class_consensus"),
-        labels,
-    )
     true_gate = _true_class_values(
-        artifacts.get("class_gate"),
+        artifacts.get("object_gate"),
         labels,
     )
-    context_uncertainty = artifacts.get("context_uncertainty")
+    true_residual = _true_class_values(
+        artifacts.get("object_residual"),
+        labels,
+    )
+    true_correction = _true_class_values(
+        artifacts.get("object_correction"),
+        labels,
+    )
 
     result: dict[str, float | int] = {
         "rescue_count_vs_context": int(rescue.sum().item()),
@@ -125,10 +123,10 @@ def _routing_metrics(
         ),
     }
     for name, tensor in [
-        ("mean_true_class_object_weight", object_weights),
-        ("mean_true_class_consensus", true_consensus),
-        ("mean_true_class_gate", true_gate),
-        ("mean_context_uncertainty", context_uncertainty),
+        ("mean_true_class_object_weight", true_weight),
+        ("mean_true_class_object_gate", true_gate),
+        ("mean_true_class_object_residual", true_residual),
+        ("mean_true_class_object_correction", true_correction),
     ]:
         value = _mean_optional(tensor, mask)
         if value is not None:
@@ -156,16 +154,11 @@ def main() -> None:
         raise FileNotFoundError(raw_path)
 
     experiment_tag = args.experiment_tag or str(
-        cfg.get("runtime", {}).get(
-            "experiment_tag",
-            "uncertainty_main_georsclip",
-        )
+        cfg.get("runtime", {}).get("experiment_tag", "core_main_georsclip")
     )
     variant = feature_variant(cfg)
 
     raw = pd.read_csv(raw_path)
-    if "experiment_tag" not in raw.columns:
-        raw["experiment_tag"] = "legacy"
     key_columns = [
         "dataset",
         "model",
