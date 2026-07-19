@@ -7,7 +7,7 @@ paths:
   datasets: datasets
   indexes: outputs/indexes
   features: outputs/features_object_context
-  results: outputs/results/object_context_anchor_v1
+  results: outputs/results/object_context_uncertainty_v1
   checkpoints: checkpoints
 
 paper_protocol:
@@ -92,8 +92,8 @@ semantic_prompts:
     - "a remote sensing crop containing {text}"
     - "a local image patch showing {text}"
 
-# Final method: context is the base classifier; local evidence is a selective
-# positive residual inside the context Top-M candidate set.
+# Final method: the context branch is the base classifier. Local object evidence
+# provides positive residual corrections weighted by normalized context entropy.
 inference:
   class_name_weight: 0.50
   local_topk: 2
@@ -104,11 +104,11 @@ inference:
   class_consensus_view_topk: 2
   class_consensus_center: 0.0
   class_consensus_temperature: 0.50
-  class_consensus_power: 1.0
   object_concept_mode: correct
   concept_shuffle_seed: 17
 
-  context_candidate_topk: 5
+  use_uncertainty_gate: true
+  uncertainty_temperature: 1.0
   positive_residual_only: true
   residual_weight: 0.50
   object_gate_center: 0.0
@@ -123,7 +123,7 @@ inference:
 runtime:
   save_predictions: true
   overwrite: false
-  experiment_tag: anchor_main_georsclip
+  experiment_tag: uncertainty_main_georsclip
 
 analysis:
   bootstrap_repetitions: 2000
