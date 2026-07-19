@@ -23,10 +23,10 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 ABLATION_TAGS = [
-    "uncertainty_ablation_no_gate",
-    "uncertainty_ablation_signed_residual",
-    "uncertainty_ablation_single_view",
-    "uncertainty_ablation_single_cue",
+    "core_ablation_no_object_gate",
+    "core_ablation_signed_residual",
+    "core_ablation_single_view",
+    "core_ablation_single_cue",
 ]
 
 
@@ -62,12 +62,9 @@ def main() -> None:
                 "architecture": architecture,
                 "feature_variant": "clean",
                 "method": method,
-                "experiment_tag": "uncertainty_main_georsclip",
+                "experiment_tag": "core_main_georsclip",
             })
-        for tag in [
-            "uncertainty_concept_shuffled",
-            "uncertainty_concept_generic",
-        ]:
+        for tag in ["core_concept_shuffled", "core_concept_generic"]:
             expected.append({
                 "dataset": dataset,
                 "model": model,
@@ -96,7 +93,7 @@ def main() -> None:
                     "architecture": architecture,
                     "feature_variant": variant,
                     "method": method,
-                    "experiment_tag": f"uncertainty_resolution_x{factor}",
+                    "experiment_tag": f"core_resolution_x{factor}",
                 })
         for backbone in protocol["cross_backbone_models"]:
             for method in PRIMARY_METHODS:
@@ -106,9 +103,7 @@ def main() -> None:
                     "architecture": protocol["cross_backbone_architecture"],
                     "feature_variant": "clean",
                     "method": method,
-                    "experiment_tag": (
-                        f"uncertainty_cross_backbone_{backbone.lower()}"
-                    ),
+                    "experiment_tag": f"core_cross_backbone_{backbone.lower()}",
                 })
 
     missing = []
