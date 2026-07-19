@@ -12,6 +12,7 @@ from rap_transclip.config import load_config
 from rap_transclip.feature_extraction import extract_features, feature_variant
 from rap_transclip.runner import run_experiment
 
+MAIN_TAG = "anchor_main_georsclip"
 MAIN_METHODS = [
     "global_classname",
     "multicrop_classname",
@@ -27,24 +28,19 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 
+# These are mechanism ablations of the final method, not comparisons with an
+# earlier in-house version.
 ABLATIONS = [
-    ("paper_ablation_view_topk1", {"object_view_topk": 1}),
-    ("paper_ablation_view_topk3", {"object_view_topk": 3}),
-    (
-        "paper_ablation_no_consensus",
-        {"consensus_power": 0.0, "class_consensus_power": 0.0},
-    ),
-    ("paper_ablation_object_cue_topk1", {"object_topk": 1}),
-    ("paper_ablation_object_cue_topk3", {"object_topk": 3}),
-    # Local feature order follows scales first, then five positions.
-    ("paper_ablation_scale_050", {"local_view_indices": [0, 1, 2, 3, 4]}),
-    ("paper_ablation_scale_075", {"local_view_indices": [5, 6, 7, 8, 9]}),
-    ("paper_ablation_center_only", {"local_view_indices": [0, 5]}),
+    ("anchor_ablation_no_candidate", {"context_candidate_topk": 0}),
+    ("anchor_ablation_candidate_top3", {"context_candidate_topk": 3}),
+    ("anchor_ablation_candidate_top10", {"context_candidate_topk": 10}),
+    ("anchor_ablation_signed_residual", {"positive_residual_only": False}),
+    ("anchor_ablation_no_consensus", {"class_consensus_power": 0.0}),
 ]
 
 CONCEPT_CONTROLS = [
-    ("paper_concept_shuffled", "shuffled"),
-    ("paper_concept_generic", "generic"),
+    ("anchor_concept_shuffled", "shuffled"),
+    ("anchor_concept_generic", "generic"),
 ]
 
 
@@ -142,6 +138,7 @@ def _preflight(cfg: dict, include_cross_backbone: bool) -> None:
         index = Path(cfg["paths"]["indexes"]) / f"{dataset}.jsonl"
         if not index.exists():
             missing.append(str(index))
+
     models = [protocol["primary_model"]]
     if include_cross_backbone:
         models = list(protocol["cross_backbone_models"])
@@ -151,6 +148,7 @@ def _preflight(cfg: dict, include_cross_backbone: bool) -> None:
         checkpoint = spec.get("checkpoint")
         if checkpoint and not Path(checkpoint).exists():
             missing.append(str(checkpoint))
+
     if missing:
         formatted = "\n".join(f"  - {item}" for item in missing)
         raise FileNotFoundError(
@@ -162,7 +160,7 @@ def _preflight(cfg: dict, include_cross_backbone: bool) -> None:
 
 def run_main(args, base: dict) -> None:
     protocol = base["paper_protocol"]
-    cfg = _copy_with(base, tag="paper_main_georsclip")
+    cfg = _copy_with(base, tag=MAIN_TAG)
     _run_grid(
         cfg,
         protocol["all_datasets"],
@@ -214,7 +212,7 @@ def run_concepts(args, base: dict) -> None:
 def run_resolution(args, base: dict) -> None:
     protocol = base["paper_protocol"]
     for factor in args.resolution_factors:
-        cfg = _copy_with(base, tag=f"paper_resolution_x{factor}")
+        cfg = _copy_with(base, tag=f"anchor_resolution_x{factor}")
         cfg["feature_extraction"]["downsample_factor"] = int(factor)
         cfg["feature_extraction"]["variant"] = (
             "clean" if factor == 1 else f"downsample_x{factor}"
@@ -237,7 +235,7 @@ def run_cross_backbone(args, base: dict) -> None:
     for model in protocol["cross_backbone_models"]:
         cfg = _copy_with(
             base,
-            tag=f"paper_cross_backbone_{model.lower()}",
+            tag=f"anchor_cross_backbone_{model.lower()}",
             model=model,
         )
         _run_grid(
