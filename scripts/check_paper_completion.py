@@ -23,11 +23,10 @@ PRIMARY_METHODS = [
     "object_context",
 ]
 ABLATION_TAGS = [
-    "anchor_ablation_no_candidate",
-    "anchor_ablation_candidate_top3",
-    "anchor_ablation_candidate_top10",
-    "anchor_ablation_signed_residual",
-    "anchor_ablation_no_consensus",
+    "uncertainty_ablation_no_gate",
+    "uncertainty_ablation_signed_residual",
+    "uncertainty_ablation_single_view",
+    "uncertainty_ablation_single_cue",
 ]
 
 
@@ -63,9 +62,12 @@ def main() -> None:
                 "architecture": architecture,
                 "feature_variant": "clean",
                 "method": method,
-                "experiment_tag": "anchor_main_georsclip",
+                "experiment_tag": "uncertainty_main_georsclip",
             })
-        for tag in ["anchor_concept_shuffled", "anchor_concept_generic"]:
+        for tag in [
+            "uncertainty_concept_shuffled",
+            "uncertainty_concept_generic",
+        ]:
             expected.append({
                 "dataset": dataset,
                 "model": model,
@@ -94,7 +96,7 @@ def main() -> None:
                     "architecture": architecture,
                     "feature_variant": variant,
                     "method": method,
-                    "experiment_tag": f"anchor_resolution_x{factor}",
+                    "experiment_tag": f"uncertainty_resolution_x{factor}",
                 })
         for backbone in protocol["cross_backbone_models"]:
             for method in PRIMARY_METHODS:
@@ -104,7 +106,9 @@ def main() -> None:
                     "architecture": protocol["cross_backbone_architecture"],
                     "feature_variant": "clean",
                     "method": method,
-                    "experiment_tag": f"anchor_cross_backbone_{backbone.lower()}",
+                    "experiment_tag": (
+                        f"uncertainty_cross_backbone_{backbone.lower()}"
+                    ),
                 })
 
     missing = []
