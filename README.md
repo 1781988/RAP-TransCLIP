@@ -183,8 +183,10 @@ Resolution variants and missing backbones still require feature extraction.
 outputs/results/object_context_uncertainty_v1/
 ├── raw_results.csv
 ├── predictions/
-├── classwise_analysis_refined.csv
-├── semantic_group_analysis_refined.csv
+├── classwise_analysis.csv
+├── semantic_group_analysis.csv
+├── main_comparison.csv
+├── main_decision.csv
 ├── missing_paper_experiments.csv
 └── analysis/
     ├── table_main_top1.csv
