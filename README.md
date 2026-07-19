@@ -1,56 +1,58 @@
 # ObjectContext-CLIP
 
-**Context-Uncertainty-Gated Local Object Residuals for Zero-Shot Remote-Sensing Scene Classification**
+**Context-Anchored Multi-Cue Local Object Residuals for Zero-Shot Remote-Sensing Scene Classification**
 
-This repository implements a training-free remote-sensing scene classifier built around one core rule:
+This repository implements a training-free remote-sensing scene classifier built around one compact rule:
 
-> Keep the whole-image context classifier as the anchor, and increase local-object corrections only when the context prediction is uncertain.
+> Keep the whole-image context classifier as the anchor and use multi-view, class-specific local object evidence only as a bounded residual correction.
 
 The current work is independent of RS-TransCLIP and does not use transductive graph optimization.
 
-## 1. Method
+## 1. Final method
 
-For every image, the framework computes:
+For each image, the framework computes:
 
 - a whole-image context score from class names and scene descriptions;
-- a local object score from deterministic crops and class-specific object/structure phrases;
-- normalized entropy of the context prediction.
+- a local object score from deterministic crops and multiple class-specific object/structure phrases.
 
 The final score is
 
 ```text
-final score = context score + context uncertainty × positive local residual
+final score = standardized context score + bounded local residual
 ```
 
-The local branch cannot directly reduce the context score. A confident context prediction receives little correction; an ambiguous context prediction allows stronger local evidence.
+The final paper method excludes the components that were not supported by the completed experiments:
+
+- no context-entropy gate;
+- no context Top-M candidate mask;
+- no class-consensus fusion term.
 
 Default configuration:
 
 ```yaml
 inference:
-  use_uncertainty_gate: true
-  uncertainty_temperature: 1.0
   positive_residual_only: true
   residual_weight: 0.50
+  use_object_gate: true
   object_topk: 2
   object_view_topk: 2
   fusion_temperature: 1.0
 ```
 
-Multi-view cue pooling and the concept bank are supporting components rather than separate paper contributions.
+The paper treats the context-anchored residual rule as the single methodological contribution. Multi-view pooling, multiple local cues, and the concept bank are supporting components.
 
 ## 2. Controlled comparisons
 
-The main table contains:
+The main table contains only external or controlled baselines:
 
 1. `global_classname`;
 2. `multicrop_classname`;
 3. `global_context`;
 4. `object_only`;
 5. `fixed_object_context`;
-6. `object_context` — the proposed uncertainty-gated residual method.
+6. `object_context` — the proposed lean residual method.
 
-Earlier internal exploratory versions are not treated as baselines.
+Internal historical versions are not treated as baselines.
 
 ## 3. Data and backbones
 
@@ -98,7 +100,7 @@ pytest -q
 Expected package version:
 
 ```text
-0.6.0
+0.7.0
 ```
 
 ## 5. Prepare indexes and checkpoints
@@ -141,23 +143,23 @@ The suite is resumable and runs:
 - classwise rescue/damage analysis;
 - paired bootstrap confidence intervals, exact McNemar tests, and Wilcoxon tests.
 
-The four ablations are:
+The four focused ablations are:
 
 ```text
-no uncertainty gate
+remove object-score gate
 signed residual instead of positive residual
 single local view per cue
 single local cue per class
 ```
 
-They test the final method components and are not comparisons with an internal version.
+These ablations test the retained components of the final method. They are not comparisons with an internal version.
 
 ## 7. Reuse existing feature caches
 
 New result directory:
 
 ```text
-outputs/results/object_context_uncertainty_v1/
+outputs/results/object_context_core_v1/
 ```
 
 Existing feature directory:
@@ -166,7 +168,7 @@ Existing feature directory:
 outputs/features_object_context/
 ```
 
-Run inference-only stages with cached features:
+Run the cache-only inference stages:
 
 ```bash
 python scripts/run_paper_suite.py \
@@ -180,7 +182,7 @@ Resolution variants and missing backbones still require feature extraction.
 ## 8. Outputs
 
 ```text
-outputs/results/object_context_uncertainty_v1/
+outputs/results/object_context_core_v1/
 ├── raw_results.csv
 ├── predictions/
 ├── classwise_analysis.csv
@@ -221,15 +223,15 @@ Analysis only:
 python scripts/analyze_paper_results.py --config configs/paper.yaml
 ```
 
-## 9. Paper
+## 9. Reporting rule
+
+The manuscript reports the final method, all controlled baselines, and the prespecified focused ablations. Known ineffective historical components are removed before the final rerun; directly relevant negative ablations from the final suite are not hidden.
 
 The active manuscript is:
 
 ```text
 paper/ObjectContext_CLIP_Chinese_Draft.md
 ```
-
-The manuscript reports only the final method, controlled baselines, focused ablations, and statistical analysis.
 
 ## 10. License
 
